@@ -1,2 +1,2 @@
-Queryable state management library for Timely Systems
-=====================================================
+Queryable state management library for Timely System
+====================================================

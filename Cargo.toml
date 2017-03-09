@@ -1,0 +1,6 @@
+[package]
+name = "timely-keepers"
+version = "0.1.0"
+authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
+
+[dependencies]

@@ -4,3 +4,6 @@ version = "0.1.0"
 authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
 
 [dependencies]
+
+[dependencies.timely-system]
+path = "timely_system/"

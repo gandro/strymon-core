@@ -1,5 +1,5 @@
 [package]
-name = "timely-keepers"
+name = "timely_keepers"
 version = "0.1.0"
 authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
 

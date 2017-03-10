@@ -1,0 +1,39 @@
+[package]
+authors = ["Sebastian Wicki <swicki@student.ethz.ch>"]
+name = "timely-system"
+version = "0.1.0"
+
+[[bin]]
+name = "coordinator"
+path = "src/bin/coordinator.rs"
+
+[[bin]]
+name = "executor"
+path = "src/bin/executor.rs"
+
+[[bin]]
+name = "submit"
+path = "src/bin/submit.rs"
+
+[[bin]]
+name = "status"
+path = "src/bin/status.rs"
+
+[dependencies]
+abomonation = "0.4.4"
+byteorder = "0.5.3"
+env_logger = "0.3"
+futures = "0.1"
+getopts = "0.2.14"
+log = "0.3"
+rand = "0.3.14"
+timely = "0.1.15"
+timely_communication = "0.1.5"
+void = "1.0.2"
+
+[replace."abomonation:0.4.4"]
+rev = "aa2d0971"
+git = "https://github.com/frankmcsherry/abomonation"
+
+[workspace]
+members = ["lib", "examples", "evaluation/sessionize", "evaluation/sensor"]

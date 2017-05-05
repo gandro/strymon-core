@@ -12,7 +12,7 @@ use futures::stream::{Stream, Fuse};
 use futures::executor::{spawn, Spawn, Unpark};
 use timely::dataflow::{Scope, Stream as TimelyStream};
 //use timely::dataflow::Stream as TimelyStream;
-use timely::dataflow::operators::{Inspect, Map};
+use timely::dataflow::operators::Inspect;
 use timely::dataflow::operators::exchange::Exchange;
 use timely::dataflow::operators::operator::source;
 
@@ -74,7 +74,7 @@ pub struct Connector<S: Scope> {
     connections: Arc<Mutex<Vec<Responder<Query>>>>,
     worker_index: usize,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
-    incoming_stream: TimelyStream<S, ClientQuery>,
+    in_stream: TimelyStream<S, ClientQuery>,
 }
 
 // TODO:
@@ -133,7 +133,7 @@ impl<S: Scope> Connector<S> {
                connections: connections,
                worker_index: worker_index,
                acceptor: acceptor,
-               incoming_stream: stream,
+               in_stream: stream,
            })
     }
 
@@ -143,6 +143,10 @@ impl<S: Scope> Connector<S> {
             .unwrap()
             .get_ref()
             .external_addr()
+    }
+
+    pub fn incoming_stream(&self) -> TimelyStream<S, ClientQuery> {
+        self.in_stream.clone()
     }
 
     pub fn outgoing_stream(&mut self, out_stream: TimelyStream<S, ClientQueryResponse>) {
@@ -265,6 +269,7 @@ mod tests {
 
     use timely;
     use timely::dataflow::operators::Map;
+    use timely::dataflow::operators::Inspect;
 
     use timely_system::network::Network;
     use core::{Query, Response};
@@ -314,6 +319,7 @@ mod tests {
             root.dataflow::<(), _, _>(|scope| {
                 let mut connector = Connector::new(Some(port), scope, 0).unwrap();
                 let stream = connector.incoming_stream();
+                stream.inspect(|x| println!("got: {}", x.query));
                 let stream = stream.map(|cq| ClientQueryResponse::new("Testing", &cq));
                 connector.outgoing_stream(stream);
             });
@@ -322,13 +328,6 @@ mod tests {
             let (client_tx, _) = network.client(addr).unwrap();
             let client_thread = thread::spawn(move || {
                 client_tx.request(&Query("Testing".to_string()))
-                    .and_then(|resp| {
-                                  assert_eq!(resp.0, "Testing".to_string());
-                                  Ok(())
-                              })
-                    .wait()
-                    .unwrap();
-                client_tx.request(&Query("innesting".to_string()))
                     .and_then(|resp| {
                                   assert_eq!(resp.0, "Testing".to_string());
                                   Ok(())

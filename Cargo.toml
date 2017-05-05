@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
 
 [dependencies]
+abomonation = "0.4.4"
+futures = "0.1.13"
+timely = "0.0.16"
+tokio-core = "0.1.6"
+
+[replace."abomonation:0.4.4"]
+rev = "aa2d0971"
+git = "https://github.com/frankmcsherry/abomonation"
 
 [dependencies.timely-system]
 path = "timely_system/"

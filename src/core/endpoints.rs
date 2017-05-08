@@ -1,5 +1,4 @@
-//! Responsible for handling of clients' requests and converting them into tuples that can be
-//! introduced into the system.
+//! Responsible for handling clients.
 use std::collections::VecDeque;
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
@@ -86,6 +85,7 @@ pub struct Connector<S: Scope> {
 //
 //  - change connections into a map (it still doesn't solve everything)
 //  - change sebastian's request responder into something with streaming responses
+//  - work only on worker 0
 
 
 impl<S: Scope> Connector<S> {

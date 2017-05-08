@@ -1,6 +1,8 @@
 Queryable state management library for Timely System
 ====================================================
 
+Anyone using this library must use the same version of the timely as the library, otherwise a lot of confusing errors is going to happen.
+
 
 Misc
 ----

@@ -71,7 +71,6 @@ pub struct Connector<S: Scope> {
     // to something better, like HashMap with generated random indexes? (then the questions is how
     // to make sure that we don't have any stragglers and then put a new one in that place)
     connections: Arc<Mutex<Vec<Responder<Query>>>>,
-    worker_index: usize,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
     in_stream: TimelyStream<S, ClientQuery>,
 }
@@ -131,7 +130,6 @@ impl<S: Scope> Connector<S> {
         });
         Ok(Connector {
                connections: connections,
-               worker_index: worker_index,
                acceptor: acceptor,
                in_stream: stream,
            })

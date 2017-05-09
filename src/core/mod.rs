@@ -23,3 +23,6 @@ impl Request for Query {
 mod endpoints;
 
 pub use self::endpoints::{Connector, ClientQuery, ClientQueryResponse};
+
+mod state;
+pub use self::state::{StateOperator, StateOperatorBuilder};

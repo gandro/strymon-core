@@ -41,6 +41,10 @@ impl ClientQuery {
             worker_index: worker_index,
         }
     }
+
+    pub fn query(&self) -> String {
+        self.query.to_string()
+    }
 }
 
 /// This needs to be created with the ClientQuery that this is the response for.
@@ -85,6 +89,7 @@ pub struct Connector<S: Scope> {
 //  - change connections into a map (it still doesn't solve everything)
 //  - change sebastian's request responder into something with streaming responses
 //  - work only on worker 0
+//  - move response creation to ClientQuery (so we do not need to import more stuff)
 
 
 impl<S: Scope> Connector<S> {

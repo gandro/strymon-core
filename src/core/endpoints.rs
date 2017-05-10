@@ -45,6 +45,15 @@ impl ClientQuery {
     pub fn query(&self) -> String {
         self.query.to_string()
     }
+
+    /// Method that creates response object.
+    pub fn create_response(&self, response: &str) -> ClientQueryResponse {
+        ClientQueryResponse {
+            response: response.to_string(),
+            connection_id: self.connection_id,
+            worker_index: self.worker_index,
+        }
+    }
 }
 
 /// This needs to be created with the ClientQuery that this is the response for.
@@ -89,7 +98,6 @@ pub struct Connector<S: Scope> {
 //  - change connections into a map (it still doesn't solve everything)
 //  - change sebastian's request responder into something with streaming responses
 //  - work only on worker 0
-//  - move response creation to ClientQuery (so we do not need to import more stuff)
 
 
 impl<S: Scope> Connector<S> {
@@ -276,7 +284,7 @@ mod tests {
 
     use timely_system::network::Network;
     use core::{Query, Response};
-    use super::{Acceptor, Connector, ClientQueryResponse};
+    use super::{Acceptor, Connector};
 
     #[test]
     fn test_acceptor() {
@@ -323,7 +331,7 @@ mod tests {
                 let mut connector = Connector::new(Some(port), scope, 0).unwrap();
                 let stream = connector.incoming_stream();
                 stream.inspect(|x| println!("got: {}", x.query));
-                let stream = stream.map(|cq| ClientQueryResponse::new("Testing", &cq));
+                let stream = stream.map(|cq| cq.create_response("Testing"));
                 connector.outgoing_stream(stream);
             });
 

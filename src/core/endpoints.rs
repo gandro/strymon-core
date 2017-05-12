@@ -171,7 +171,7 @@ impl<S: Scope> Connector<S> {
                 conns.drain(idx..idx + 1)
                     .next()
                     .unwrap()
-                    .respond(Ok(Response(cqr.response.to_string())));
+                    .respond(Ok(Response::new(&cqr.response)));
             });
     }
 }
@@ -224,7 +224,7 @@ impl Acceptor {
                 // We expect to receive only one message - the query.
                 match rx.poll() {
                     Ok(Async::Ready(Some(req))) => {
-                        let (Query(query), resp) = req.decode::<Query>()?;
+                        let (Query { text: query }, resp) = req.decode::<Query>()?;
                         self.pending_queries.push_back((query, resp));
                     }
                     Ok(Async::NotReady) => self.pending_clients.push_back((tx, rx)),

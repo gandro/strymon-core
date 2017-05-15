@@ -1,4 +1,5 @@
 #[macro_use]
+extern crate abomonation_derive;
 extern crate abomonation;
 extern crate timely_system;
 extern crate timely;

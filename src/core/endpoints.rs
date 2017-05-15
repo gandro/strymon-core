@@ -5,7 +5,6 @@ use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::vec::Vec;
 
-use abomonation::Abomonation;
 use futures::{Poll, Async};
 use futures::stream::{Stream, Fuse};
 use futures::executor::{spawn, Spawn, Unpark};
@@ -20,7 +19,7 @@ use timely_system::network::reqrep::{Server, Incoming, Outgoing, Responder};
 
 use super::{Query, Response};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Abomonation)]
 pub struct ClientQuery {
     query: String,
     /// connection_id is valid only in the context of the same worker, so ClientQuery needs to know
@@ -30,8 +29,6 @@ pub struct ClientQuery {
     /// worker as it was created, and thus sent to the correct client.
     worker_index: usize,
 }
-
-unsafe_abomonate!(ClientQuery);
 
 impl ClientQuery {
     pub fn new(query: &str, connection_id: usize, worker_index: usize) -> Self {
@@ -57,14 +54,12 @@ impl ClientQuery {
 }
 
 /// This needs to be created with the ClientQuery that this is the response for.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Abomonation)]
 pub struct ClientQueryResponse {
     response: String,
     connection_id: usize,
     worker_index: usize,
 }
-
-unsafe_abomonate!(ClientQueryResponse);
 
 impl ClientQueryResponse {
     pub fn new(response: &str, cq: &ClientQuery) -> Self {

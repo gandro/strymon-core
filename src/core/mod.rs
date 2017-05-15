@@ -1,8 +1,7 @@
-use abomonation::Abomonation;
 use timely_system::network::reqrep::Request;
 
 // Abomonation doesn't work with structs with anonymous fields unfortunately.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Abomonation)]
 pub struct Query {
     pub text: String,
 }
@@ -15,7 +14,7 @@ impl Query {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Abomonation)]
 pub struct Response {
     pub text: String,
 }
@@ -27,9 +26,6 @@ impl Response {
         }
     }
 }
-
-unsafe_abomonate!(Query: text);
-unsafe_abomonate!(Response: text);
 
 impl Request for Query {
     type Success = Response;

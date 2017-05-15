@@ -1,10 +1,11 @@
 [package]
-name = "timely_keepers"
+name = "timely-keepers"
 version = "0.1.0"
 authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
 
 [dependencies]
 abomonation = "0.4.4"
+abomonation_derive = "0.1.2"
 futures = "0.1.13"
 timely = "0.2.0"
 tokio-core = "0.1.6"
@@ -15,3 +16,6 @@ git = "https://github.com/frankmcsherry/abomonation"
 
 [dependencies.timely-system]
 path = "timely_system/"
+
+[dependencies.timely-query]
+path = "timely_system/lib"

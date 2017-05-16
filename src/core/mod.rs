@@ -15,20 +15,20 @@ impl Query {
 }
 
 #[derive(Clone, Debug, Abomonation)]
-pub struct Response {
+pub struct ResponseTuple {
     pub text: String,
 }
 
-impl Response {
+impl ResponseTuple {
     pub fn new(text: &str) -> Self {
-        Response {
+        ResponseTuple {
             text: text.to_string(),
         }
     }
 }
 
 impl Request for Query {
-    type Success = Response;
+    type Success = ResponseTuple;
     // TODO!!: add meaningful error
     type Error = ();
 
@@ -43,3 +43,5 @@ pub use self::endpoints::{Connector, ClientQuery, ClientQueryResponse};
 
 mod state;
 pub use self::state::{StateOperator, StateOperatorBuilder};
+
+pub mod messenger;

@@ -56,7 +56,9 @@ fn main() {
                         });
                     })
                     .construct();
-            connector.outgoing_stream(state_operator.get_outgoing_clients_stream());
+            let out_stream = state_operator.get_outgoing_clients_stream()
+                                           .inspect(|x| println!("Respond to client: {:?}", x));
+            connector.outgoing_stream(out_stream);
             input
         });
 

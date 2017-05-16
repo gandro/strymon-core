@@ -14,10 +14,10 @@ use timely::dataflow::operators::Inspect;
 use timely::dataflow::operators::exchange::Exchange;
 use timely::dataflow::operators::operator::source;
 
-use timely_system::network::Network;
-use timely_system::network::reqrep::{Server, Incoming, Outgoing, Responder};
+use timely_system::network::{Network, Listener};
 
-use super::{Query, Response};
+use core::messenger::Messenger;
+use super::{Query, ResponseTuple};
 
 #[derive(Clone, Debug, Abomonation)]
 pub struct ClientQuery {
@@ -78,7 +78,7 @@ pub struct Connector<S: Scope> {
     // TODO important!! change Vec (that we will run out of in case of a big number of connections)
     // to something better, like HashMap with generated random indexes? (then the questions is how
     // to make sure that we don't have any stragglers and then put a new one in that place)
-    connections: Arc<Mutex<Vec<Responder<Query>>>>,
+    connections: Arc<Mutex<Vec<Messenger<Query, ResponseTuple>>>>,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
     in_stream: TimelyStream<S, ClientQuery>,
 }
@@ -93,6 +93,7 @@ pub struct Connector<S: Scope> {
 //  - change connections into a map (it still doesn't solve everything)
 //  - change sebastian's request responder into something with streaming responses
 //  - work only on worker 0
+//  - split this file into multiple smaller
 
 
 impl<S: Scope> Connector<S> {
@@ -114,8 +115,8 @@ impl<S: Scope> Connector<S> {
                 // Putting Noop here since we don't need notification.
                 let noop = Arc::new(NoopUnpark {});
                 match acceptor.poll_stream(noop) {
-                    Ok(Async::Ready(Some((query, receiver)))) => {
-                        connections.push(receiver);
+                    Ok(Async::Ready(Some((query, messenger)))) => {
+                        connections.push(messenger);
                         let element = ClientQuery::new(&query, connections.len() - 1, worker_index);
                         let mut session = output.session(capability.as_ref().unwrap());
                         session.give(element);
@@ -159,31 +160,29 @@ impl<S: Scope> Connector<S> {
         let connections = self.connections.clone();
         out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index as u64)
             .inspect(move |cqr| {
-                let idx = cqr.worker_index;
+                let idx = cqr.connection_id;
                 // TODO Fix this! this assumes that the connection for the given client actually
                 // exists!
-                let mut conns = connections.lock().unwrap();
-                conns.drain(idx..idx + 1)
-                    .next()
-                    .unwrap()
-                    .respond(Ok(Response::new(&cqr.response)));
+                let conns = connections.lock().unwrap();
+                // TODO do something when client disconnects
+                let _ = conns[idx].send_message(ResponseTuple::new(&cqr.response));
             });
     }
 }
 
 /// Accept and unwrap clients' requests.
 struct Acceptor {
-    server: Fuse<Server>,
+    listener: Fuse<Listener>,
     addr: SocketAddr,
-    pending_clients: VecDeque<(Outgoing, Incoming)>,
-    pending_queries: VecDeque<(String, Responder<Query>)>,
+    pending_clients: VecDeque<Messenger<Query, ResponseTuple>>,
+    pending_queries: VecDeque<(String, Messenger<Query, ResponseTuple>)>,
 }
 
 impl Acceptor {
     fn new<P: Into<Option<u16>>>(port: P) -> io::Result<Self> {
         let network = Network::init()?;
-        let server = network.server(port)?;
-        let addr = match server.external_addr()
+        let listener = network.listen(port)?;
+        let addr = match listener.external_addr()
                   .to_socket_addrs()?
                   .next() {
             Some(addr) => addr,
@@ -192,7 +191,7 @@ impl Acceptor {
             }
         };
         Ok(Acceptor {
-               server: server.fuse(),
+               listener: listener.fuse(),
                addr: addr,
                pending_clients: VecDeque::new(),
                pending_queries: VecDeque::new(),
@@ -205,9 +204,9 @@ impl Acceptor {
 
     /// Handshake all incoming client connections.
     fn poll_clients(&mut self) -> io::Result<()> {
-        // TODO important! what if server poll returns error? what does it mean?
-        while let Async::Ready(Some(client_tuple)) = self.server.poll()? {
-            self.pending_clients.push_back(client_tuple);
+        // TODO important! what if listener poll returns error? what does it mean?
+        while let Async::Ready(Some((tx, rx))) = self.listener.poll()? {
+            self.pending_clients.push_back(Messenger::new(tx, rx));
         }
         Ok(())
     }
@@ -215,14 +214,13 @@ impl Acceptor {
     /// Get details of their query from all waiting clients.
     fn poll_queries(&mut self) -> io::Result<()> {
         for _ in 0..self.pending_clients.len() {
-            if let Some((tx, mut rx)) = self.pending_clients.pop_front() {
+            if let Some(mut messenger) = self.pending_clients.pop_front() {
                 // We expect to receive only one message - the query.
-                match rx.poll() {
-                    Ok(Async::Ready(Some(req))) => {
-                        let (Query { text: query }, resp) = req.decode::<Query>()?;
-                        self.pending_queries.push_back((query, resp));
+                match messenger.poll() {
+                    Ok(Async::Ready(Some(Query { text: query }))) => {
+                        self.pending_queries.push_back((query, messenger));
                     }
-                    Ok(Async::NotReady) => self.pending_clients.push_back((tx, rx)),
+                    Ok(Async::NotReady) => self.pending_clients.push_back(messenger),
                     // None or Err means that client disconnected.
                     Ok(Async::Ready(None)) => (),
                     Err(_) => (),
@@ -236,11 +234,11 @@ impl Acceptor {
 }
 
 impl Stream for Acceptor {
-    type Item = (String, Responder<Query>);
+    type Item = (String, Messenger<Query, ResponseTuple>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if !self.server.is_done() {
+        if !self.listener.is_done() {
             self.poll_clients()?;
         }
         if !self.pending_clients.is_empty() {
@@ -249,7 +247,7 @@ impl Stream for Acceptor {
         match self.pending_queries.pop_front() {
             Some(el) => Ok(Async::Ready(Some(el))),
             None => {
-                if self.server.is_done() {
+                if self.listener.is_done() {
                     Ok(Async::Ready(None))
                 } else {
                     Ok(Async::NotReady)
@@ -258,7 +256,6 @@ impl Stream for Acceptor {
         }
     }
 }
-
 
 struct NoopUnpark {}
 
@@ -271,14 +268,16 @@ impl Unpark for NoopUnpark {
 mod tests {
     use std::thread;
     use std::net::ToSocketAddrs;
-    use futures::{Future, Stream};
+    use futures::Stream;
 
     use timely;
     use timely::dataflow::operators::Map;
     use timely::dataflow::operators::Inspect;
 
     use timely_system::network::Network;
-    use core::{Query, Response};
+    use timely_system::network::message::MessageBuf;
+    use timely_system::network::message::abomonate::Abomonate;
+    use core::{Query, ResponseTuple};
     use super::{Acceptor, Connector};
 
     #[test]
@@ -287,23 +286,26 @@ mod tests {
         let addr = acceptor.external_addr();
 
         let network = Network::init().unwrap();
-        let (client_tx, _) = network.client(addr).unwrap();
+        let (client_tx, client_rx) = network.connect(addr).unwrap();
 
         let client_thread = thread::spawn(move || {
-            let query = Query("Testing".to_string());
-            client_tx.request(&query)
-                .and_then(|resp| {
-                              assert_eq!(resp.0, "Testing".to_string());
-                              Ok(())
-                          })
-                .wait()
-                .unwrap()
+            let query = Query::new("Testing");
+            // Send query.
+            let mut buf = MessageBuf::empty();
+            buf.push::<Abomonate, Query>(&query).unwrap();
+            client_tx.send(buf);
+
+            // Receive reqponse.
+            let resp_buf = client_rx.wait().next().unwrap();
+            let mut resp_buf = resp_buf.unwrap();
+            let resp = resp_buf.pop::<Abomonate, ResponseTuple>().unwrap();
+            assert_eq!(resp.text, "Testing".to_string());
         });
 
         for conn in acceptor.take(1).wait() {
-            let (query, resp) = conn.unwrap();
+            let (query, messenger) = conn.unwrap();
             assert_eq!(query, "Testing".to_string());
-            resp.respond(Ok(Response("Testing".to_string())));
+            messenger.send_message(ResponseTuple::new("Testing")).unwrap();
         }
         let _ = client_thread.join();
     }
@@ -331,15 +333,19 @@ mod tests {
             });
 
             let network = Network::init().unwrap();
-            let (client_tx, _) = network.client(addr).unwrap();
+            let (client_tx, client_rx) = network.connect(addr).unwrap();
             let client_thread = thread::spawn(move || {
-                client_tx.request(&Query("Testing".to_string()))
-                    .and_then(|resp| {
-                                  assert_eq!(resp.0, "Testing".to_string());
-                                  Ok(())
-                              })
-                    .wait()
-                    .unwrap();
+                let query = Query::new("Testing");
+                // Send query.
+                let mut buf = MessageBuf::empty();
+                buf.push::<Abomonate, Query>(&query).unwrap();
+                client_tx.send(buf);
+
+                // Receive reqponse.
+                let resp_buf = client_rx.wait().next().unwrap();
+                let mut resp_buf = resp_buf.unwrap();
+                let resp = resp_buf.pop::<Abomonate, ResponseTuple>().unwrap();
+                assert_eq!(resp.text, "Testing".to_string());
             });
 
             while root.step() {}

@@ -1,5 +1,5 @@
 //! Responsible for handling clients.
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -24,14 +24,14 @@ pub struct ClientQuery {
     query: String,
     /// connection_id is valid only in the context of the same worker, so ClientQuery needs to know
     /// what worker_index it is binded to.
-    connection_id: usize,
+    connection_id: u64,
     /// worker_index is used to make sure this query is directed to outgoing stream on the same
     /// worker as it was created, and thus sent to the correct client.
     worker_index: usize,
 }
 
 impl ClientQuery {
-    pub fn new(query: &str, connection_id: usize, worker_index: usize) -> Self {
+    pub fn new(query: &str, connection_id: u64, worker_index: usize) -> Self {
         ClientQuery {
             query: query.to_string(),
             connection_id: connection_id,
@@ -57,7 +57,7 @@ impl ClientQuery {
 #[derive(Clone, Debug, Abomonation)]
 pub struct ClientQueryResponse {
     response: String,
-    connection_id: usize,
+    connection_id: u64,
     worker_index: usize,
 }
 
@@ -75,10 +75,7 @@ impl ClientQueryResponse {
 ///
 /// It's implementation of Iterator trait hides all the errors from clients and produces
 pub struct Connector<S: Scope> {
-    // TODO important!! change Vec (that we will run out of in case of a big number of connections)
-    // to something better, like HashMap with generated random indexes? (then the questions is how
-    // to make sure that we don't have any stragglers and then put a new one in that place)
-    connections: Arc<Mutex<Vec<Messenger<Query, ResponseTuple>>>>,
+    connections: Arc<Mutex<ConnectionStorage>>,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
     in_stream: TimelyStream<S, ClientQuery>,
 }
@@ -88,10 +85,8 @@ pub struct Connector<S: Scope> {
 //  - remove inactive connections (if a client drops off before we responded)
 //  - add statistics of what has been removed
 //  - keep something more complicated in connections
-//  - maybe make it into Stream and Sink (futures)
 //
 //  - change connections into a map (it still doesn't solve everything)
-//  - change sebastian's request responder into something with streaming responses
 //  - work only on worker 0
 //  - split this file into multiple smaller
 
@@ -101,7 +96,7 @@ impl<S: Scope> Connector<S> {
                                      scope: &mut S,
                                      worker_index: usize)
                                      -> io::Result<Self> {
-        let connections = Arc::new(Mutex::new(Vec::new()));
+        let connections = Arc::new(Mutex::new(ConnectionStorage::new()));
         let acceptor = Arc::new(Mutex::new(spawn(Acceptor::new(port)?)));
         let stream = source(scope, "IncomingClients", |capability| {
             let mut capability = Some(capability);
@@ -116,8 +111,8 @@ impl<S: Scope> Connector<S> {
                 let noop = Arc::new(NoopUnpark {});
                 match acceptor.poll_stream(noop) {
                     Ok(Async::Ready(Some((query, messenger)))) => {
-                        connections.push(messenger);
-                        let element = ClientQuery::new(&query, connections.len() - 1, worker_index);
+                        let conn_id = connections.insert_connection(messenger);
+                        let element = ClientQuery::new(&query, conn_id, worker_index);
                         let mut session = output.session(capability.as_ref().unwrap());
                         session.give(element);
                     }
@@ -161,12 +156,48 @@ impl<S: Scope> Connector<S> {
         out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index as u64)
             .inspect(move |cqr| {
                 let idx = cqr.connection_id;
-                // TODO Fix this! this assumes that the connection for the given client actually
-                // exists!
-                let conns = connections.lock().unwrap();
+                let connections = connections.lock().unwrap();
                 // TODO do something when client disconnects
-                let _ = conns[idx].send_message(ResponseTuple::new(&cqr.response));
+                match connections.get_connection(&idx) {
+                    Some(connection) => {
+                        let _ = connection.send_message(ResponseTuple::new(&cqr.response));
+                    }
+                    None => (),
+                }
             });
+    }
+}
+
+/// Helper struct for storing user connections.
+struct ConnectionStorage {
+    // connections is a HashMap of user connections indexed by u64. A new user connection simply
+    // gets id by adding one to previous id being used (wrapping to 0 if we hit max u64). Since we
+    // use u64 we should never fall into already taken place, but should check for that in future.
+    connections: HashMap<u64, Messenger<Query, ResponseTuple>>,
+    next_conn_id: u64,
+}
+
+impl ConnectionStorage {
+    fn new() -> Self {
+        ConnectionStorage {
+            connections: HashMap::new(),
+            next_conn_id: 0,
+        }
+    }
+
+    fn insert_connection(&mut self, conn: Messenger<Query, ResponseTuple>) -> u64 {
+        self.connections.insert(self.next_conn_id, conn);
+        let idx = self.next_conn_id;
+        self.next_conn_id = self.next_conn_id.wrapping_add(1);
+        idx
+    }
+
+    fn get_connection(&self, key: &u64) -> Option<&Messenger<Query, ResponseTuple>> {
+        self.connections.get(key)
+    }
+
+    fn remove_connection(&mut self, key: &u64) {
+        self.connections.remove(key);
     }
 }
 

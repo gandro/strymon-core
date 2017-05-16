@@ -3,7 +3,6 @@ use std::collections::{VecDeque, HashMap};
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::vec::Vec;
 
 use futures::{Poll, Async};
 use futures::stream::{Stream, Fuse};
@@ -17,59 +16,8 @@ use timely::dataflow::operators::operator::source;
 use timely_system::network::{Network, Listener};
 
 use core::messenger::Messenger;
+use core::data::{ClientQuery, ClientQueryResponse};
 use super::{Query, ResponseTuple};
-
-#[derive(Clone, Debug, Abomonation)]
-pub struct ClientQuery {
-    query: String,
-    /// connection_id is valid only in the context of the same worker, so ClientQuery needs to know
-    /// what worker_index it is binded to.
-    connection_id: u64,
-    /// worker_index is used to make sure this query is directed to outgoing stream on the same
-    /// worker as it was created, and thus sent to the correct client.
-    worker_index: usize,
-}
-
-impl ClientQuery {
-    pub fn new(query: &str, connection_id: u64, worker_index: usize) -> Self {
-        ClientQuery {
-            query: query.to_string(),
-            connection_id: connection_id,
-            worker_index: worker_index,
-        }
-    }
-
-    pub fn query(&self) -> String {
-        self.query.to_string()
-    }
-
-    /// Method that creates response object.
-    pub fn create_response(&self, response: &str) -> ClientQueryResponse {
-        ClientQueryResponse {
-            response: response.to_string(),
-            connection_id: self.connection_id,
-            worker_index: self.worker_index,
-        }
-    }
-}
-
-/// This needs to be created with the ClientQuery that this is the response for.
-#[derive(Clone, Debug, Abomonation)]
-pub struct ClientQueryResponse {
-    response: String,
-    connection_id: u64,
-    worker_index: usize,
-}
-
-impl ClientQueryResponse {
-    pub fn new(response: &str, cq: &ClientQuery) -> Self {
-        ClientQueryResponse {
-            response: response.to_string(),
-            connection_id: cq.connection_id,
-            worker_index: cq.worker_index,
-        }
-    }
-}
 
 /// Helper structure that handles accepting clients' requests and responding to them.
 ///
@@ -153,14 +101,14 @@ impl<S: Scope> Connector<S> {
 
     pub fn outgoing_stream(&mut self, out_stream: TimelyStream<S, ClientQueryResponse>) {
         let connections = self.connections.clone();
-        out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index as u64)
+        out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index() as u64)
             .inspect(move |cqr| {
-                let idx = cqr.connection_id;
+                let idx = cqr.connection_id();
                 let connections = connections.lock().unwrap();
                 // TODO do something when client disconnects
                 match connections.get_connection(&idx) {
                     Some(connection) => {
-                        let _ = connection.send_message(ResponseTuple::new(&cqr.response));
+                        let _ = connection.send_message(ResponseTuple::new(&cqr.response()));
                     }
                     None => (),
                 }

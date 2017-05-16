@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use timely::dataflow::operators::{Input, Inspect};
 use timely::dataflow::channels::pact::Pipeline;
-use timely_keepers::core::{Connector, StateOperatorBuilder, ClientQueryResponse};
+use timely_keepers::core::{Connector, StateOperatorBuilder};
+use timely_keepers::core::data::ClientQueryResponse;
 
 
 fn main() {

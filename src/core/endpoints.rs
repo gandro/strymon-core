@@ -15,7 +15,9 @@ use timely::dataflow::operators::operator::source;
 use timely::dataflow::scopes::child::Child;
 use timely::progress::timestamp::Timestamp;
 
+use timely_system::query::Coordinator;
 use timely_system::network::{Network, Listener};
+use timely_system::query::keepers::KeeperRegistrationError;
 
 use core::messenger::Messenger;
 use core::data::{ClientQuery, ClientQueryResponse};
@@ -26,6 +28,7 @@ pub struct Connector<'a, S: ScopeParent, T: Timestamp> {
     connections: Arc<Mutex<ConnectionStorage>>,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
     in_stream: TimelyStream<Child<'a, S, T>, ClientQuery>,
+    worker_index: usize,
 }
 
 // TODO:
@@ -81,6 +84,7 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
                connections: connections,
                acceptor: acceptor,
                in_stream: stream,
+               worker_index: scope.index(),
            })
     }
 
@@ -111,6 +115,15 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
                     None => (),
                 }
             });
+    }
+
+    pub fn register_with_coordinator(&self,
+                                     coord: &Coordinator)
+                                     -> Result<(), KeeperRegistrationError> {
+        if self.worker_index == 0 {
+            coord.register_keeper("PrototypeKeeper", self.external_addr())?;
+        }
+        Ok(())
     }
 }
 

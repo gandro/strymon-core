@@ -14,9 +14,7 @@ fn main() {
     timely_query::execute(|root, coord| {
         let mut input = root.dataflow::<u32, _, _>(|scope| {
             let mut connector = Connector::new(None, scope).unwrap();
-            if scope.index() == 0 {
-                coord.register_keeper("PrototypeKeeper", connector.external_addr()).unwrap();
-            }
+            connector.register_with_coordinator(&coord).unwrap();
             println!("Keeper registered");
             let clients_stream =
                 connector.incoming_stream().inspect(|x| println!("From client: {:?}", x));

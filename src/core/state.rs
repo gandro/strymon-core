@@ -163,7 +163,7 @@ mod tests {
     use timely::dataflow::operators::{ToStream, Inspect};
     use timely::dataflow::channels::pact::Pipeline;
 
-    use core::{ClientQuery, ClientQueryResponse};
+    use core::data::ClientQuery;
     use super::StateOperatorBuilder;
 
     /// This tests if the API works. There are no asserts in here, but if it doesn't compile or
@@ -193,7 +193,7 @@ mod tests {
                         let st = state.borrow();
                         let mut session = output.session(&cap);
                         for d in data.iter() {
-                            let resp = ClientQueryResponse::new(&(*st.to_string()), d);
+                            let resp = d.create_response(&(*st.to_string()));
                             session.give(resp);
                         }
                     });

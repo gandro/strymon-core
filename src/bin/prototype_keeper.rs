@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use timely::dataflow::operators::{Input, Inspect};
 use timely::dataflow::channels::pact::Pipeline;
 use timely_keepers::core::{Connector, StateOperatorBuilder};
-use timely_keepers::core::data::ClientQueryResponse;
 
 
 fn main() {
@@ -51,7 +50,7 @@ fn main() {
                                 if let Some(value) = st.get(&query) {
                                     resp_str = format!("{}: {}", query, value);
                                 }
-                                let resp = ClientQueryResponse::new(&resp_str, cq);
+                                let resp = cq.create_response(&resp_str);
                                 session.give(resp);
                             }
                         });

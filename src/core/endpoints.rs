@@ -20,8 +20,6 @@ use core::data::{ClientQuery, ClientQueryResponse};
 use super::{Query, ResponseTuple};
 
 /// Helper structure that handles accepting clients' requests and responding to them.
-///
-/// It's implementation of Iterator trait hides all the errors from clients and produces
 pub struct Connector<S: Scope> {
     connections: Arc<Mutex<ConnectionStorage>>,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
@@ -30,11 +28,9 @@ pub struct Connector<S: Scope> {
 
 // TODO:
 //  - make Coordinator aware of multiple workers (and thus multiple copies of the same Keeper)
-//  - remove inactive connections (if a client drops off before we responded)
 //  - add statistics of what has been removed
 //  - keep something more complicated in connections
 //
-//  - change connections into a map (it still doesn't solve everything)
 //  - work only on worker 0
 //  - split this file into multiple smaller
 
@@ -306,7 +302,7 @@ mod tests {
             root.dataflow::<(), _, _>(|scope| {
                 let mut connector = Connector::new(Some(port), scope, 0).unwrap();
                 let stream = connector.incoming_stream();
-                stream.inspect(|x| println!("got: {}", x.query));
+                stream.inspect(|x| println!("got: {}", x.query()));
                 let stream = stream.map(|cq| cq.create_response("Testing"));
                 connector.outgoing_stream(stream);
             });

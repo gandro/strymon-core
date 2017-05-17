@@ -7,11 +7,13 @@ use std::sync::{Arc, Mutex};
 use futures::{Poll, Async};
 use futures::stream::{Stream, Fuse};
 use futures::executor::{spawn, Spawn, Unpark};
-use timely::dataflow::{Scope, Stream as TimelyStream};
+use timely::dataflow::{ScopeParent, Stream as TimelyStream};
 //use timely::dataflow::Stream as TimelyStream;
 use timely::dataflow::operators::Inspect;
 use timely::dataflow::operators::exchange::Exchange;
 use timely::dataflow::operators::operator::source;
+use timely::dataflow::scopes::child::Child;
+use timely::progress::timestamp::Timestamp;
 
 use timely_system::network::{Network, Listener};
 
@@ -20,10 +22,10 @@ use core::data::{ClientQuery, ClientQueryResponse};
 use super::{Query, ResponseTuple};
 
 /// Helper structure that handles accepting clients' requests and responding to them.
-pub struct Connector<S: Scope> {
+pub struct Connector<'a, S: ScopeParent, T: Timestamp> {
     connections: Arc<Mutex<ConnectionStorage>>,
     acceptor: Arc<Mutex<Spawn<Acceptor>>>,
-    in_stream: TimelyStream<S, ClientQuery>,
+    in_stream: TimelyStream<Child<'a, S, T>, ClientQuery>,
 }
 
 // TODO:
@@ -35,11 +37,9 @@ pub struct Connector<S: Scope> {
 //  - split this file into multiple smaller
 
 
-impl<S: Scope> Connector<S> {
-    pub fn new<P: Into<Option<u16>>>(port: P,
-                                     scope: &mut S,
-                                     worker_index: usize)
-                                     -> io::Result<Self> {
+impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
+    pub fn new<P: Into<Option<u16>>>(port: P, scope: &mut Child<'a, S, T>) -> io::Result<Self> {
+        let worker_index = scope.index();
         let connections = Arc::new(Mutex::new(ConnectionStorage::new()));
         let acceptor = Arc::new(Mutex::new(spawn(Acceptor::new(port)?)));
         let stream = source(scope, "IncomingClients", |capability| {
@@ -51,14 +51,15 @@ impl<S: Scope> Connector<S> {
                 let mut acceptor = acceptor.lock().unwrap();
                 let mut connections = connections.lock().unwrap();
 
-                // Putting Noop here since we don't need notification.
+                // Using Noop here since we don't need notification.
                 let noop = Arc::new(NoopUnpark {});
                 match acceptor.poll_stream(noop) {
                     Ok(Async::Ready(Some((query, messenger)))) => {
-                        let conn_id = connections.insert_connection(messenger);
-                        let element = ClientQuery::new(&query, conn_id, worker_index);
-                        let mut session = output.session(capability.as_ref().unwrap());
-                        session.give(element);
+                        if let Some(cap) = capability.as_mut() {
+                            let conn_id = connections.insert_connection(messenger);
+                            let element = ClientQuery::new(&query, conn_id, worker_index);
+                            output.session(&cap).give(element);
+                        }
                     }
                     Ok(Async::NotReady) => (),
                     Ok(Async::Ready(None)) => {
@@ -91,11 +92,12 @@ impl<S: Scope> Connector<S> {
             .external_addr()
     }
 
-    pub fn incoming_stream(&self) -> TimelyStream<S, ClientQuery> {
+    pub fn incoming_stream(&self) -> TimelyStream<Child<'a, S, T>, ClientQuery> {
         self.in_stream.clone()
     }
 
-    pub fn outgoing_stream(&mut self, out_stream: TimelyStream<S, ClientQueryResponse>) {
+    pub fn outgoing_stream(&mut self,
+                           out_stream: TimelyStream<Child<'a, S, T>, ClientQueryResponse>) {
         let connections = self.connections.clone();
         out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index() as u64)
             .inspect(move |cqr| {

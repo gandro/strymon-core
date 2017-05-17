@@ -2,8 +2,8 @@ extern crate timely;
 extern crate timely_keepers;
 extern crate timely_query;
 
-use std::{thread, time};
 use std::collections::HashMap;
+use std::time::Instant;
 
 use timely::dataflow::operators::{Input, Inspect};
 use timely::dataflow::channels::pact::Pipeline;
@@ -13,8 +13,10 @@ use timely_keepers::core::{Connector, StateOperatorBuilder};
 fn main() {
     timely_query::execute(|root, coord| {
         let mut input = root.dataflow::<u32, _, _>(|scope| {
-            let mut connector = Connector::new(None, scope, 0).unwrap();
-            coord.register_keeper("PrototypeKeeper", connector.external_addr()).unwrap();
+            let mut connector = Connector::new(None, scope).unwrap();
+            if scope.index() == 0 {
+                coord.register_keeper("PrototypeKeeper", connector.external_addr()).unwrap();
+            }
             println!("Keeper registered");
             let clients_stream =
                 connector.incoming_stream().inspect(|x| println!("From client: {:?}", x));
@@ -69,13 +71,18 @@ fn main() {
         // Where ACTION is one of {+1, -1}. +1 means ADD or UPDATE, -1 means REMOVE
         // KEY is a string - the key
         // VALUE is a number - the value
-        println!("let's start introducing values");
-        for round in 0..10000 {
-            thread::sleep(time::Duration::from_secs(2));
-            input.send((1, format!("key_{}", round), 1));
-            input.send((1, "key_sum".to_string(), round));
-            input.advance_to((round + 1) as u32);
-            root.step();
+        if root.index() == 0 {
+            println!("let's start introducing values");
+            for round in 0..10000 {
+                let start = Instant::now();
+                while start.elapsed().as_secs() < 5 {
+                    root.step();
+                }
+                input.send((1, format!("key_{}", round), 1));
+                input.send((1, "key_sum".to_string(), round));
+                input.advance_to((round + 1) as u32);
+                root.step();
+            }
         }
     })
             .unwrap();

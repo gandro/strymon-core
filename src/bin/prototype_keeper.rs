@@ -50,7 +50,8 @@ fn main() {
                                 if let Some(value) = st.get(&query) {
                                     resp_str = format!("{}: {}", query, value);
                                 }
-                                let resp = cq.create_response(&resp_str);
+                                let mut resp = cq.create_response();
+                                resp.add_tuple(&resp_str);
                                 session.give(resp);
                             }
                         });

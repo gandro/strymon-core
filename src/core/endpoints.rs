@@ -1,5 +1,6 @@
 //! Responsible for handling clients.
 use std::collections::{VecDeque, HashMap};
+use std::collections::hash_map::Entry;
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -106,13 +107,17 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
         out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index() as u64)
             .inspect(move |cqr| {
                 let idx = cqr.connection_id();
-                let connections = connections.lock().unwrap();
+                let mut connections = connections.lock().unwrap();
                 // TODO do something when client disconnects
-                match connections.get_connection(&idx) {
-                    Some(connection) => {
-                        let _ = connection.send_message(ResponseTuple::new(&cqr.response()));
+                match connections.entry(idx) {
+                    Entry::Occupied(connection) => {
+                        for response in cqr.response_tuples() {
+                            let _ = connection.get().send_message(ResponseTuple::new(response));
+                        }
+                        // TODO: stop removing here once we get update semantics
+                        connection.remove_entry();
                     }
-                    None => (),
+                    Entry::Vacant(_) => (),
                 }
             });
     }
@@ -151,12 +156,8 @@ impl ConnectionStorage {
         idx
     }
 
-    fn get_connection(&self, key: &u64) -> Option<&Messenger<Query, ResponseTuple>> {
-        self.connections.get(key)
-    }
-
-    fn remove_connection(&mut self, key: &u64) {
-        self.connections.remove(key);
+    fn entry(&mut self, key: u64) -> Entry<u64, Messenger<Query, ResponseTuple>> {
+        self.connections.entry(key)
     }
 }
 

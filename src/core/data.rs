@@ -1,3 +1,4 @@
+use std::vec::Vec;
 
 #[derive(Clone, Debug, Abomonation)]
 pub struct ClientQuery {
@@ -24,9 +25,9 @@ impl ClientQuery {
     }
 
     /// Method that creates response object.
-    pub fn create_response(&self, response: &str) -> ClientQueryResponse {
+    pub fn create_response(&self) -> ClientQueryResponse {
         ClientQueryResponse {
-            response: response.to_string(),
+            response_tuples: Vec::new(),
             connection_id: self.connection_id,
             worker_index: self.worker_index,
         }
@@ -36,22 +37,18 @@ impl ClientQuery {
 /// This needs to be created with the ClientQuery that this is the response for.
 #[derive(Clone, Debug, Abomonation)]
 pub struct ClientQueryResponse {
-    response: String,
+    response_tuples: Vec<String>,
     connection_id: u64,
     worker_index: usize,
 }
 
 impl ClientQueryResponse {
-    pub fn new(response: &str, cq: &ClientQuery) -> Self {
-        ClientQueryResponse {
-            response: response.to_string(),
-            connection_id: cq.connection_id,
-            worker_index: cq.worker_index,
-        }
+    pub fn add_tuple(&mut self, tuple: &str) {
+        self.response_tuples.push(tuple.to_string());
     }
 
-    pub fn response(&self) -> String {
-        self.response.to_string()
+    pub fn response_tuples(&self) -> &Vec<String> {
+        &self.response_tuples
     }
 
     pub fn worker_index(&self) -> usize {

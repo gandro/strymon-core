@@ -317,10 +317,14 @@ mod tests {
                 .unwrap();
 
             root.dataflow::<(), _, _>(|scope| {
-                let mut connector = Connector::new(Some(port), scope, 0).unwrap();
+                let mut connector = Connector::new(Some(port), scope).unwrap();
                 let stream = connector.incoming_stream();
                 stream.inspect(|x| println!("got: {}", x.query()));
-                let stream = stream.map(|cq| cq.create_response("Testing"));
+                let stream = stream.map(|cq| {
+                    let mut cr = cq.create_response();
+                    cr.add_tuple("Testing");
+                    cr
+                });
                 connector.outgoing_stream(stream);
             });
 

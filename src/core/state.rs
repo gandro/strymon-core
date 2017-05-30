@@ -193,7 +193,8 @@ mod tests {
                         let st = state.borrow();
                         let mut session = output.session(&cap);
                         for d in data.iter() {
-                            let resp = d.create_response(&(*st.to_string()));
+                            let mut resp = d.create_response();
+                            resp.add_tuple(&(*st.to_string()));
                             session.give(resp);
                         }
                     });

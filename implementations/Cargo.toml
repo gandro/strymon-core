@@ -1,0 +1,21 @@
+[package]
+name = "implementations"
+version = "0.1.0"
+authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
+
+[dependencies]
+abomonation = "0.4.4"
+abomonation_derive = "0.1.2"
+futures = "0.1.13"
+timely = "0.2.0"
+tokio-core = "0.1.6"
+regex = "0.2.1"
+lazy_static = "0.2.8"
+clap = "2.24.2"
+
+[dependencies.timely-keepers]
+path = ".."
+
+[dependencies.timely-query]
+path = "../timely_system/lib"
+

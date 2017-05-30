@@ -104,7 +104,7 @@ fn main() {
         let (mut input, cap) = root.dataflow::<i32, _, _>(|scope| {
             let (input_tuple, text_stream) = scope.new_unordered_input::<String>();
             let mut connector = Connector::new(None, scope).unwrap();
-            connector.register_with_coordinator(&coord).unwrap();
+            connector.register_with_coordinator("WordCountKeeper", &coord).unwrap();
             let clients_stream =
                 connector.incoming_stream().inspect(|x| println!("From client: {:?}", x));
 

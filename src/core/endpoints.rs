@@ -123,10 +123,11 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
     }
 
     pub fn register_with_coordinator(&self,
+                                     name: &str,
                                      coord: &Coordinator)
                                      -> Result<(), KeeperRegistrationError> {
         if self.worker_index == 0 {
-            coord.register_keeper("PrototypeKeeper", self.external_addr())?;
+            coord.register_keeper(name, self.external_addr())?;
         }
         Ok(())
     }

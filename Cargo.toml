@@ -9,17 +9,13 @@ abomonation_derive = "0.1.2"
 futures = "0.1.13"
 timely = "0.2.0"
 tokio-core = "0.1.6"
-# just for examples, might need to go somewhere else
-regex = "0.2.1"
-lazy_static = "0.2.8"
-clap = "2.24.2"
-
-[replace."abomonation:0.4.4"]
-rev = "aa2d0971"
-git = "https://github.com/frankmcsherry/abomonation"
 
 [dependencies.timely-system]
 path = "timely_system/"
 
 [dependencies.timely-query]
 path = "timely_system/lib"
+
+[workspace]
+members = ["implementations"]
+exclude = ["timely_system"]

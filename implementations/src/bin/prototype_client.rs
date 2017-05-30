@@ -2,7 +2,6 @@ extern crate futures;
 extern crate timely;
 extern crate timely_keepers;
 extern crate timely_query;
-extern crate timely_system;
 
 use timely::dataflow::operators::{Input, Inspect};
 

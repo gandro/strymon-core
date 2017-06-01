@@ -1,5 +1,5 @@
-//! [WIP!]
 //! Example keeper that keeps statistics about number of words and exposes them as key-value store.
+//! It assumes to be run as one worker.
 //!
 //! It reads input (a text) from "word_count_input" pub/sub channel, and stores statistics in its
 //! state.

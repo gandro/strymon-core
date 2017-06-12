@@ -15,7 +15,9 @@ fn main() {
             input
         });
 
-        let keeper_data = KeeperQuery::new("key_sum", "PrototypeKeeper", &coord).unwrap();
+        let query = "key_sum".to_string();
+        let keeper_data = KeeperQuery::<String, String>::new(&query, "PrototypeKeeper", &coord)
+            .unwrap();
         let mut round = 0;
         for data in keeper_data {
             round += 1;

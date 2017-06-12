@@ -29,7 +29,8 @@ fn main() {
                                        });
 
         let query = format!("G;{};{}", range_start, range_end);
-        let keeper_data = KeeperQuery::new(&query, "WordCountKeeper", &coord).unwrap();
+        let keeper_data = KeeperQuery::<String, String>::new(&query, "WordCountKeeper", &coord)
+            .unwrap();
         let mut round = 0;
         for data in keeper_data {
             round += 1;

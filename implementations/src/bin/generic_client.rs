@@ -24,7 +24,7 @@ fn main() {
                                            input
                                        });
 
-        let keeper_data = KeeperQuery::new(&query, &keeper, &coord).unwrap();
+        let keeper_data = KeeperQuery::<String, String>::new(&query, &keeper, &coord).unwrap();
         let mut round = 0;
         for data in keeper_data {
             round += 1;

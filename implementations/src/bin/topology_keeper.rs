@@ -324,7 +324,7 @@ fn main() {
     timely_query::execute(|root, coord| {
         let (mut input, cap) = root.dataflow::<i32, _, _>(|scope| {
             let (input_tuple, network_updates) = scope.new_unordered_input::<String>();
-            let mut connector = Connector::new(None, scope).unwrap();
+            let mut connector = Connector::<String, String, _, _>::new(None, scope).unwrap();
             connector.register_with_coordinator("TopologyKeeper", &coord).unwrap();
             let clients_stream =
                 connector.incoming_stream().inspect(|x| println!("From client: {:?}", x));

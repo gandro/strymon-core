@@ -13,7 +13,7 @@ use timely_keepers::core::{Connector, StateOperatorBuilder};
 fn main() {
     timely_query::execute(|root, coord| {
         let mut input = root.dataflow::<u32, _, _>(|scope| {
-            let mut connector = Connector::new(None, scope).unwrap();
+            let mut connector = Connector::<String, String, _, _>::new(None, scope).unwrap();
             connector.register_with_coordinator("PrototypeKeeper", &coord).unwrap();
             println!("Keeper registered");
             let clients_stream =
@@ -47,7 +47,7 @@ fn main() {
                             for cq in data.iter() {
                                 let query = cq.query();
                                 let mut resp_str = String::new();
-                                if let Some(value) = st.get(&query) {
+                                if let Some(value) = st.get(query) {
                                     resp_str = format!("{}: {}", query, value);
                                 }
                                 let mut resp = cq.create_response();

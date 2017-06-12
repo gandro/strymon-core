@@ -1,8 +1,13 @@
+use std::any::Any;
 use std::vec::Vec;
+use abomonation::Abomonation;
+use timely_system::network::message::abomonate::NonStatic;
 
 #[derive(Clone, Debug, Abomonation)]
-pub struct ClientQuery {
-    query: String,
+pub struct ClientQuery<D>
+    where D: Abomonation + Any + Clone + NonStatic
+{
+    query: D,
     /// connection_id is valid only in the context of the same worker, so ClientQuery needs to know
     /// what worker_index it is binded to.
     connection_id: u64,
@@ -11,21 +16,25 @@ pub struct ClientQuery {
     worker_index: usize,
 }
 
-impl ClientQuery {
-    pub fn new(query: &str, connection_id: u64, worker_index: usize) -> Self {
+impl<D> ClientQuery<D>
+    where D: Abomonation + Any + Clone + NonStatic
+{
+    pub fn new(query: &D, connection_id: u64, worker_index: usize) -> Self {
         ClientQuery {
-            query: query.to_string(),
+            query: query.clone(),
             connection_id: connection_id,
             worker_index: worker_index,
         }
     }
 
-    pub fn query(&self) -> String {
-        self.query.to_string()
+    pub fn query(&self) -> &D {
+        &self.query
     }
 
     /// Method that creates response object.
-    pub fn create_response(&self) -> ClientQueryResponse {
+    pub fn create_response<R>(&self) -> ClientQueryResponse<R>
+        where R: Abomonation + Any + Clone + Send + NonStatic
+    {
         ClientQueryResponse {
             response_tuples: Vec::new(),
             connection_id: self.connection_id,
@@ -36,18 +45,22 @@ impl ClientQuery {
 
 /// This needs to be created with the ClientQuery that this is the response for.
 #[derive(Clone, Debug, Abomonation)]
-pub struct ClientQueryResponse {
-    response_tuples: Vec<String>,
+pub struct ClientQueryResponse<D>
+    where D: Abomonation + Any + Clone + Send + NonStatic
+{
+    response_tuples: Vec<D>,
     connection_id: u64,
     worker_index: usize,
 }
 
-impl ClientQueryResponse {
-    pub fn add_tuple(&mut self, tuple: &str) {
-        self.response_tuples.push(tuple.to_string());
+impl<D> ClientQueryResponse<D>
+    where D: Abomonation + Any + Clone + Send + NonStatic
+{
+    pub fn add_tuple(&mut self, tuple: &D) {
+        self.response_tuples.push(tuple.clone());
     }
 
-    pub fn response_tuples(&self) -> &Vec<String> {
+    pub fn response_tuples(&self) -> &Vec<D> {
         &self.response_tuples
     }
 
@@ -58,5 +71,4 @@ impl ClientQueryResponse {
     pub fn connection_id(&self) -> u64 {
         self.connection_id
     }
-
 }

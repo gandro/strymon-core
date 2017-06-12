@@ -4,7 +4,9 @@ use std::collections::hash_map::Entry;
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::any::Any;
 
+use abomonation::Abomonation;
 use futures::{Poll, Async};
 use futures::stream::{Stream, Fuse};
 use futures::executor::{spawn, Spawn, Unpark};
@@ -19,16 +21,19 @@ use timely::progress::timestamp::Timestamp;
 use timely_system::query::Coordinator;
 use timely_system::network::{Network, Listener};
 use timely_system::query::keepers::KeeperRegistrationError;
+use timely_system::network::message::abomonate::NonStatic;
 
 use core::messenger::Messenger;
-use core::data::{ClientQuery, ClientQueryResponse};
-use super::{Query, ResponseTuple};
+use core::model::{ClientQuery, ClientQueryResponse};
 
 /// Helper structure that handles accepting clients' requests and responding to them.
-pub struct Connector<'a, S: ScopeParent, T: Timestamp> {
-    connections: Arc<Mutex<ConnectionStorage>>,
-    acceptor: Arc<Mutex<Spawn<Acceptor>>>,
-    in_stream: TimelyStream<Child<'a, S, T>, ClientQuery>,
+pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
+    connections: Arc<Mutex<ConnectionStorage<Q, R>>>,
+    acceptor: Arc<Mutex<Spawn<Acceptor<Q, R>>>>,
+    in_stream: TimelyStream<Child<'a, S, T>, ClientQuery<Q>>,
     worker_index: usize,
 }
 
@@ -41,7 +46,10 @@ pub struct Connector<'a, S: ScopeParent, T: Timestamp> {
 //  - split this file into multiple smaller
 
 
-impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
+impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
     pub fn new<P: Into<Option<u16>>>(port: P, scope: &mut Child<'a, S, T>) -> io::Result<Self> {
         let worker_index = scope.index();
         let connections = Arc::new(Mutex::new(ConnectionStorage::new()));
@@ -97,14 +105,14 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
             .external_addr()
     }
 
-    pub fn incoming_stream(&self) -> TimelyStream<Child<'a, S, T>, ClientQuery> {
+    pub fn incoming_stream(&self) -> TimelyStream<Child<'a, S, T>, ClientQuery<Q>> {
         self.in_stream.clone()
     }
 
     pub fn outgoing_stream(&mut self,
-                           out_stream: TimelyStream<Child<'a, S, T>, ClientQueryResponse>) {
+                           out_stream: TimelyStream<Child<'a, S, T>, ClientQueryResponse<R>>) {
         let connections = self.connections.clone();
-        out_stream.exchange(|cqr: &ClientQueryResponse| cqr.worker_index() as u64)
+        out_stream.exchange(|cqr: &ClientQueryResponse<R>| cqr.worker_index() as u64)
             .inspect(move |cqr| {
                 let idx = cqr.connection_id();
                 let mut connections = connections.lock().unwrap();
@@ -112,7 +120,7 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
                 match connections.entry(idx) {
                     Entry::Occupied(connection) => {
                         for response in cqr.response_tuples() {
-                            let _ = connection.get().send_message(ResponseTuple::new(response));
+                            let _ = connection.get().send_message(response.clone());
                         }
                         // TODO: stop removing here once we get update semantics
                         connection.remove_entry();
@@ -134,15 +142,21 @@ impl<'a, S: ScopeParent, T: Timestamp> Connector<'a, S, T> {
 }
 
 /// Helper struct for storing user connections.
-struct ConnectionStorage {
+struct ConnectionStorage<Q, R>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
     // connections is a HashMap of user connections indexed by u64. A new user connection simply
     // gets id by adding one to previous id being used (wrapping to 0 if we hit max u64). Since we
     // use u64 we should never fall into already taken place, but should check for that in future.
-    connections: HashMap<u64, Messenger<Query, ResponseTuple>>,
+    connections: HashMap<u64, Messenger<Q, R>>,
     next_conn_id: u64,
 }
 
-impl ConnectionStorage {
+impl<Q, R> ConnectionStorage<Q, R>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
     fn new() -> Self {
         ConnectionStorage {
             connections: HashMap::new(),
@@ -150,27 +164,33 @@ impl ConnectionStorage {
         }
     }
 
-    fn insert_connection(&mut self, conn: Messenger<Query, ResponseTuple>) -> u64 {
+    fn insert_connection(&mut self, conn: Messenger<Q, R>) -> u64 {
         self.connections.insert(self.next_conn_id, conn);
         let idx = self.next_conn_id;
         self.next_conn_id = self.next_conn_id.wrapping_add(1);
         idx
     }
 
-    fn entry(&mut self, key: u64) -> Entry<u64, Messenger<Query, ResponseTuple>> {
+    fn entry(&mut self, key: u64) -> Entry<u64, Messenger<Q, R>> {
         self.connections.entry(key)
     }
 }
 
 /// Accept and unwrap clients' requests.
-struct Acceptor {
+struct Acceptor<Q, R>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
     listener: Fuse<Listener>,
     addr: SocketAddr,
-    pending_clients: VecDeque<Messenger<Query, ResponseTuple>>,
-    pending_queries: VecDeque<(String, Messenger<Query, ResponseTuple>)>,
+    pending_clients: VecDeque<Messenger<Q, R>>,
+    pending_queries: VecDeque<(Q, Messenger<Q, R>)>,
 }
 
-impl Acceptor {
+impl<Q, R> Acceptor<Q, R>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
     fn new<P: Into<Option<u16>>>(port: P) -> io::Result<Self> {
         let network = Network::init()?;
         let listener = network.listen(port)?;
@@ -209,7 +229,7 @@ impl Acceptor {
             if let Some(mut messenger) = self.pending_clients.pop_front() {
                 // We expect to receive only one message - the query.
                 match messenger.poll() {
-                    Ok(Async::Ready(Some(Query { text: query }))) => {
+                    Ok(Async::Ready(Some(query))) => {
                         self.pending_queries.push_back((query, messenger));
                     }
                     Ok(Async::NotReady) => self.pending_clients.push_back(messenger),
@@ -225,8 +245,11 @@ impl Acceptor {
     }
 }
 
-impl Stream for Acceptor {
-    type Item = (String, Messenger<Query, ResponseTuple>);
+impl<Q, R> Stream for Acceptor<Q, R>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
+    type Item = (Q, Messenger<Q, R>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -269,35 +292,35 @@ mod tests {
     use timely_system::network::Network;
     use timely_system::network::message::MessageBuf;
     use timely_system::network::message::abomonate::Abomonate;
-    use core::{Query, ResponseTuple};
     use super::{Acceptor, Connector};
 
     #[test]
     fn test_acceptor() {
-        let acceptor = Acceptor::new(None).unwrap();
+        let acceptor = Acceptor::<String, String>::new(None).unwrap();
         let addr = acceptor.external_addr();
 
         let network = Network::init().unwrap();
         let (client_tx, client_rx) = network.connect(addr).unwrap();
 
         let client_thread = thread::spawn(move || {
-            let query = Query::new("Testing");
+            let query = "Testing".to_string();
             // Send query.
             let mut buf = MessageBuf::empty();
-            buf.push::<Abomonate, Query>(&query).unwrap();
+            buf.push::<Abomonate, String>(&query).unwrap();
             client_tx.send(buf);
 
             // Receive reqponse.
             let resp_buf = client_rx.wait().next().unwrap();
             let mut resp_buf = resp_buf.unwrap();
-            let resp = resp_buf.pop::<Abomonate, ResponseTuple>().unwrap();
-            assert_eq!(resp.text, "Testing".to_string());
+            let resp = resp_buf.pop::<Abomonate, String>().unwrap();
+            assert_eq!(resp, "Testing".to_string());
         });
 
         for conn in acceptor.take(1).wait() {
             let (query, messenger) = conn.unwrap();
             assert_eq!(query, "Testing".to_string());
-            messenger.send_message(ResponseTuple::new("Testing")).unwrap();
+            let resp = "Testing".to_string();
+            messenger.send_message(resp).unwrap();
         }
         let _ = client_thread.join();
     }
@@ -317,31 +340,32 @@ mod tests {
                 .unwrap();
 
             root.dataflow::<(), _, _>(|scope| {
-                let mut connector = Connector::new(Some(port), scope).unwrap();
+                let mut connector = Connector::<String, String, _, _>::new(Some(port), scope)
+                    .unwrap();
                 let stream = connector.incoming_stream();
                 stream.inspect(|x| println!("got: {}", x.query()));
                 let stream = stream.map(|cq| {
-                    let mut cr = cq.create_response();
-                    cr.add_tuple("Testing");
-                    cr
-                });
+                                            let mut cr = cq.create_response();
+                                            cr.add_tuple(&"Testing".to_string());
+                                            cr
+                                        });
                 connector.outgoing_stream(stream);
             });
 
             let network = Network::init().unwrap();
             let (client_tx, client_rx) = network.connect(addr).unwrap();
             let client_thread = thread::spawn(move || {
-                let query = Query::new("Testing");
+                let query = "Testing".to_string();
                 // Send query.
                 let mut buf = MessageBuf::empty();
-                buf.push::<Abomonate, Query>(&query).unwrap();
+                buf.push::<Abomonate, String>(&query).unwrap();
                 client_tx.send(buf);
 
                 // Receive reqponse.
                 let resp_buf = client_rx.wait().next().unwrap();
                 let mut resp_buf = resp_buf.unwrap();
-                let resp = resp_buf.pop::<Abomonate, ResponseTuple>().unwrap();
-                assert_eq!(resp.text, "Testing".to_string());
+                let resp = resp_buf.pop::<Abomonate, String>().unwrap();
+                assert_eq!(resp, "Testing".to_string());
             });
 
             while root.step() {}

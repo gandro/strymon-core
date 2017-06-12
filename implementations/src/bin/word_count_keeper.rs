@@ -103,7 +103,7 @@ fn main() {
     timely_query::execute(|root, coord| {
         let (mut input, cap) = root.dataflow::<i32, _, _>(|scope| {
             let (input_tuple, text_stream) = scope.new_unordered_input::<String>();
-            let mut connector = Connector::new(None, scope).unwrap();
+            let mut connector = Connector::<String, String, _, _>::new(None, scope).unwrap();
             connector.register_with_coordinator("WordCountKeeper", &coord).unwrap();
             let clients_stream =
                 connector.incoming_stream().inspect(|x| println!("From client: {:?}", x));
@@ -138,7 +138,7 @@ fn main() {
                             let mut session = output.session(&cap);
                             for cq in data.iter() {
                                 let mut response = cq.create_response();
-                                match parse_query(&cq.query()) {
+                                match parse_query(cq.query()) {
                                     Some((action, start, end)) => {
                                         match action {
                                             QueryType::Get => {

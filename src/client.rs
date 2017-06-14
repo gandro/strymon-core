@@ -9,7 +9,7 @@ use timely_system::network::Network;
 use timely_system::query::keepers::KeeperLookupError;
 use timely_system::network::message::abomonate::NonStatic;
 
-use core::messenger::Messenger;
+use keeper::messenger::Messenger;
 
 /// Supposed to be used as something you can iterate over and send data it produces to input.
 pub struct KeeperQuery<Q, R>

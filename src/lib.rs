@@ -6,9 +6,6 @@ extern crate abomonation;
 extern crate timely_system;
 extern crate timely;
 
-pub mod core;
+pub mod keeper;
 pub mod client;
-
-#[test]
-fn it_works() {
-}
+pub mod model;

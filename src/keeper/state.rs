@@ -163,7 +163,8 @@ mod tests {
     use timely::dataflow::operators::{ToStream, Inspect};
     use timely::dataflow::channels::pact::Pipeline;
 
-    use core::model::ClientQuery;
+    use keeper::model::ClientQuery;
+    use model::{KeeperQuery, KeeperResponse};
     use super::StateOperatorBuilder;
 
     /// This tests if the API works. There are no asserts in here, but if it doesn't compile or
@@ -173,9 +174,9 @@ mod tests {
     #[test]
     fn test() {
         timely::example(|scope| {
-            let empty_query = String::new();
-            let client_stream = vec![ClientQuery::new(&empty_query, 0, 0),
-                                     ClientQuery::new(&empty_query, 0, 0)]
+            let empty_query = KeeperQuery::Query(String::new());
+            let client_stream = vec![ClientQuery::new(empty_query.clone(), 0, 0),
+                                     ClientQuery::new(empty_query.clone(), 0, 0)]
                     .to_stream(scope);
             let input_stream = (0..10).to_stream(scope);
 
@@ -196,7 +197,7 @@ mod tests {
                         let mut session = output.session(&cap);
                         for d in data.iter() {
                             let mut resp = d.create_response();
-                            resp.add_tuple(&((*st).to_string()));
+                            resp.add_tuple(KeeperResponse::Response((*st).to_string()));
                             session.give(resp);
                         }
                     });

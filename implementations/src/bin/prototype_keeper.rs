@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use timely::dataflow::operators::{Input, Inspect};
 use timely::dataflow::channels::pact::Pipeline;
-use timely_keepers::core::{Connector, StateOperatorBuilder};
+use timely_keepers::keeper::{Connector, StateOperatorBuilder};
+use timely_keepers::model::{KeeperQuery, KeeperResponse};
 
 
 fn main() {
@@ -45,13 +46,18 @@ fn main() {
                             let st = state.borrow();
                             let mut session = output.session(&cap);
                             for cq in data.iter() {
-                                let query = cq.query();
+                                // TODO: this match should dissapear once we get the logic for
+                                // updates
+                                let query = match cq.query() {
+                                    &KeeperQuery::Query(ref q) => q.to_string(),
+                                    _ => "".to_string(),
+                                };
                                 let mut resp_str = String::new();
-                                if let Some(value) = st.get(query) {
+                                if let Some(value) = st.get(&query) {
                                     resp_str = format!("{}: {}", query, value);
                                 }
                                 let mut resp = cq.create_response();
-                                resp.add_tuple(&resp_str);
+                                resp.add_tuple(KeeperResponse::Response(resp_str));
                                 session.give(resp);
                             }
                         });

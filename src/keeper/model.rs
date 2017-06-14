@@ -3,11 +3,13 @@ use std::vec::Vec;
 use abomonation::Abomonation;
 use timely_system::network::message::abomonate::NonStatic;
 
-#[derive(Clone, Debug, Abomonation)]
+use model::{KeeperQuery, KeeperResponse};
+
+#[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
 pub struct ClientQuery<D>
     where D: Abomonation + Any + Clone + NonStatic
 {
-    query: D,
+    query: KeeperQuery<D>,
     /// connection_id is valid only in the context of the same worker, so ClientQuery needs to know
     /// what worker_index it is binded to.
     connection_id: u64,
@@ -19,15 +21,15 @@ pub struct ClientQuery<D>
 impl<D> ClientQuery<D>
     where D: Abomonation + Any + Clone + NonStatic
 {
-    pub fn new(query: &D, connection_id: u64, worker_index: usize) -> Self {
+    pub fn new(query: KeeperQuery<D>, connection_id: u64, worker_index: usize) -> Self {
         ClientQuery {
-            query: query.clone(),
+            query: query,
             connection_id: connection_id,
             worker_index: worker_index,
         }
     }
 
-    pub fn query(&self) -> &D {
+    pub fn query(&self) -> &KeeperQuery<D> {
         &self.query
     }
 
@@ -44,11 +46,11 @@ impl<D> ClientQuery<D>
 }
 
 /// This needs to be created with the ClientQuery that this is the response for.
-#[derive(Clone, Debug, Abomonation)]
+#[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
 pub struct ClientQueryResponse<D>
     where D: Abomonation + Any + Clone + Send + NonStatic
 {
-    response_tuples: Vec<D>,
+    response_tuples: Vec<KeeperResponse<D>>,
     connection_id: u64,
     worker_index: usize,
 }
@@ -56,11 +58,11 @@ pub struct ClientQueryResponse<D>
 impl<D> ClientQueryResponse<D>
     where D: Abomonation + Any + Clone + Send + NonStatic
 {
-    pub fn add_tuple(&mut self, tuple: &D) {
-        self.response_tuples.push(tuple.clone());
+    pub fn add_tuple(&mut self, tuple: KeeperResponse<D>) {
+        self.response_tuples.push(tuple);
     }
 
-    pub fn response_tuples(&self) -> &Vec<D> {
+    pub fn response_tuples(&self) -> &Vec<KeeperResponse<D>> {
         &self.response_tuples
     }
 

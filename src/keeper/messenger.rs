@@ -24,7 +24,7 @@ use timely_system::network::{Receiver, Sender};
 /// # extern crate futures;
 /// # fn main() {
 /// use futures::{Async, Stream};
-/// use timely_keepers::core::messenger::Messenger;
+/// use timely_keepers::keeper::messenger::Messenger;
 /// use timely_system::network::Network;
 /// 
 /// let network = Network::init().unwrap();

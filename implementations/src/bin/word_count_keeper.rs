@@ -52,7 +52,8 @@ use regex::Regex;
 use timely::dataflow::operators::{Map, UnorderedInput, Inspect};
 use timely::dataflow::channels::message::Content;
 use timely::dataflow::channels::pact::Pipeline;
-use timely_keepers::core::{Connector, StateOperatorBuilder};
+use timely_keepers::keeper::{Connector, StateOperatorBuilder};
+use timely_keepers::model::{KeeperQuery, KeeperResponse};
 
 enum QueryType {
     Get,
@@ -138,14 +139,21 @@ fn main() {
                             let mut session = output.session(&cap);
                             for cq in data.iter() {
                                 let mut response = cq.create_response();
-                                match parse_query(cq.query()) {
+                                // TODO: this match should dissapear once we get the logic for
+                                // updates
+                                let query = match cq.query() {
+                                    &KeeperQuery::Query(ref q) => q.to_string(),
+                                    _ => "".to_string(),
+                                };
+                                match parse_query(&query) {
                                     Some((action, start, end)) => {
                                         match action {
                                             QueryType::Get => {
                                                 for (key, value) in state.range(start..end) {
-                                                    response.add_tuple(&format!("{}:{}",
+                                                    response.add_tuple(
+                                                        KeeperResponse::Response(format!("{}:{}",
                                                                                 key,
-                                                                                value));
+                                                                                value)));
                                                 }
                                             }
                                             QueryType::Update => (),

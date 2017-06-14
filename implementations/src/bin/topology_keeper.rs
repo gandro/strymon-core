@@ -43,7 +43,8 @@ use std::collections::HashMap;
 
 use regex::Regex;
 use topology_model::topology::{Connection, Host, Switch, NodeId, LinkId, LinkWeight, Topology};
-use timely_keepers::core::{Connector, StateOperatorBuilder};
+use timely_keepers::keeper::{Connector, StateOperatorBuilder};
+use timely_keepers::model::{KeeperQuery, KeeperResponse};
 use timely::dataflow::channels::message::Content;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::{Map, UnorderedInput, Inspect};
@@ -388,19 +389,27 @@ fn main() {
                             let mut session = output.session(&cap);
                             for cq in data.iter() {
                                 let mut response = cq.create_response();
-                                match parse_query(&cq.query()) {
+                                // TODO: this match should dissapear once we get the logic for
+                                // updates
+                                let query = match cq.query() {
+                                    &KeeperQuery::Query(ref q) => q.to_string(),
+                                    _ => "".to_string(),
+                                };
+                                match parse_query(&query) {
                                     Some(QueryType::GetAllHosts) => {
                                         for h in state.topology.all_hosts() {
                                             let ref switch_name =
                                                 state.topology.get_switch(h.switch_id).name;
-                                            response.add_tuple(&format!("H;{};{}",
-                                                                        h.name,
-                                                                        switch_name));
+                                            response.add_tuple(
+                                                KeeperResponse::Response(format!("H;{};{}",
+                                                                         h.name,
+                                                                         switch_name)));
                                         }
                                     }
                                     Some(QueryType::GetAllSwitches) => {
                                         for s in state.topology.all_switches() {
-                                            response.add_tuple(&format!("S;{}", s.name));
+                                            response.add_tuple(
+                                                KeeperResponse::Response(format!("S;{}", s.name)));
                                         }
                                     }
                                     Some(QueryType::GetAllConnections) => {
@@ -408,11 +417,12 @@ fn main() {
                                             let ref s1_name =
                                                 state.topology.get_switch(c.from).name;
                                             let ref s2_name = state.topology.get_switch(c.to).name;
-                                            response.add_tuple(&format!("C;{};{};{};{}",
+                                            response.add_tuple(
+                                                KeeperResponse::Response(format!("C;{};{};{};{}",
                                                                         s1_name,
                                                                         s2_name,
                                                                         c.weight,
-                                                                        1));
+                                                                        1)));
                                         }
                                     }
                                     Some(QueryType::IsConnected(sname1, sname2)) => {
@@ -437,14 +447,14 @@ fn main() {
                                             }
                                             break;
                                         }
-                                        response.add_tuple(&format!("C;{};{};{};{}",
+                                        response.add_tuple(
+                                            KeeperResponse::Response(format!("C;{};{};{};{}",
                                                                     sname1,
                                                                     sname2,
                                                                     weight,
-                                                                    is_conn));
+                                                                    is_conn)));
                                     }
-                                    // TODO: Insert something to end the connection.
-                                    None => (),
+                                    None => response.add_tuple(KeeperResponse::ConnectionEnd),
                                 }
 
                                 session.give(response);

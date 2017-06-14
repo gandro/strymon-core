@@ -5,7 +5,7 @@ extern crate timely_query;
 
 use timely::dataflow::operators::{Input, Inspect};
 
-use timely_keepers::client::KeeperQuery;
+use timely_keepers::client::KeeperStreamBuilder;
 
 fn main() {
     timely_query::execute(|root, coord| {
@@ -16,7 +16,8 @@ fn main() {
         });
 
         let query = "key_sum".to_string();
-        let keeper_data = KeeperQuery::<String, String>::new(&query, "PrototypeKeeper", &coord)
+        let keeper_data = KeeperStreamBuilder::<String, String>::new("PrototypeKeeper", &coord)
+            .query(query)
             .unwrap();
         let mut round = 0;
         for data in keeper_data {

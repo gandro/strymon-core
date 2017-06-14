@@ -5,7 +5,7 @@ extern crate timely_query;
 
 use clap::App;
 use timely::dataflow::operators::{Input, Inspect};
-use timely_keepers::client::KeeperQuery;
+use timely_keepers::client::KeeperStreamBuilder;
 
 fn main() {
     let cmd_args = App::new("word_count_client")
@@ -29,7 +29,8 @@ fn main() {
                                        });
 
         let query = format!("G;{};{}", range_start, range_end);
-        let keeper_data = KeeperQuery::<String, String>::new(&query, "WordCountKeeper", &coord)
+        let keeper_data = KeeperStreamBuilder::<String, String>::new("WordCountKeeper", &coord)
+            .query(query)
             .unwrap();
         let mut round = 0;
         for data in keeper_data {

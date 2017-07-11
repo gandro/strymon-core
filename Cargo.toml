@@ -9,6 +9,8 @@ abomonation_derive = "0.1.2"
 futures = "0.1.13"
 timely = "0.2.0"
 tokio-core = "0.1.6"
+log = "0.3.7"
+env_logger = "0.3"
 
 [dependencies.timely-system]
 path = "timely_system/"

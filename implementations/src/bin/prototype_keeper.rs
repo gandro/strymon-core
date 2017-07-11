@@ -1,69 +1,85 @@
 extern crate timely;
 extern crate timely_keepers;
 extern crate timely_query;
+extern crate implementations;
 
 use std::collections::HashMap;
 use std::time::Instant;
+use std::vec::Vec;
 
 use timely::dataflow::operators::{Input, Inspect};
-use timely::dataflow::channels::pact::Pipeline;
 use timely_keepers::keeper::{Connector, StateOperatorBuilder};
-use timely_keepers::model::{KeeperQuery, KeeperResponse};
 
+use implementations::{PrototypeQueryType, PrototypeKeyValueUpdate};
 
+// RustFmt is very bad at formatting StateOperatorBuilder arguments
+#[cfg_attr(rustfmt, rustfmt_skip)]
 fn main() {
     timely_query::execute(|root, coord| {
         let mut input = root.dataflow::<u32, _, _>(|scope| {
-            let mut connector = Connector::<String, String, _, _>::new(None, scope).unwrap();
+            let mut connector =
+                Connector::<PrototypeQueryType, PrototypeKeyValueUpdate<i64>, _, _>::new(None,
+                                                                                         scope)
+                        .unwrap();
             connector.register_with_coordinator("PrototypeKeeper", &coord).unwrap();
             println!("Keeper registered");
             let clients_stream =
                 connector.incoming_stream().inspect(|x| println!("From client: {:?}", x));
 
-            let (input, data_stream) = scope.new_input::<(i32, String, i64)>();
+            let (input, data_stream) = scope.new_input::<PrototypeKeyValueUpdate<i64>>();
             let data_stream = data_stream.inspect(|x| println!("Data: {:?}", x));
 
             let state_map = HashMap::<String, i64>::new();
 
-            let state_operator =
-                StateOperatorBuilder::new(state_map, &data_stream, &clients_stream)
-                    .state_unary_stream(Pipeline, "KeyValueState", |state, input, output| {
-                        input.for_each(|cap, data| {
-                            let mut state = state.borrow_mut();
-                            let mut session = output.session(&cap);
-                            for &(action, ref key, value) in data.iter() {
-                                if action > 0 {
-                                    state.insert(key.clone(), value.clone());
-                                } else {
-                                    state.remove(key);
-                                }
-                                session.give((action, key.to_string(), value));
-                            }
-                        });
-                    })
-                    .clients_unary_stream(Pipeline, "KeyValueResponder", |state, input, output| {
-                        input.for_each(|cap, data| {
-                            let st = state.borrow();
-                            let mut session = output.session(&cap);
-                            for cq in data.iter() {
-                                // TODO: this match should dissapear once we get the logic for
-                                // updates
-                                let query = match cq.query() {
-                                    &KeeperQuery::Query(ref q) => q.to_string(),
-                                    _ => "".to_string(),
-                                };
-                                let mut resp_str = String::new();
-                                if let Some(value) = st.get(&query) {
-                                    resp_str = format!("{}: {}", query, value);
-                                }
-                                let mut resp = cq.create_response();
-                                resp.add_tuple(KeeperResponse::Response(resp_str));
-                                session.give(resp);
-                            }
-                        });
+            let state_operator = StateOperatorBuilder::new(
+                "PrototypeKeeperState",
+                state_map,
+                &data_stream,
+                &clients_stream,
+                scope.index(),
+                |state, update| {
+                    let mut state = state.borrow_mut();
+                    match update {
+                        &PrototypeKeyValueUpdate::Existing { ref key, ref value } => {
+                            state.insert(key.clone(), value.clone());
+                        }
+                        &PrototypeKeyValueUpdate::Removed { ref key } => {
+                            state.remove(key);
+                        }
+                    }
+                },
+                |update| vec![update.clone()],
+                |state| {
+                    // Dump state logic.
+                    let state = state.borrow();
+                    let mut dump = Vec::new();
+                    for (key, value) in state.iter() {
+                        dump.push(PrototypeKeyValueUpdate::Existing {
+                                      key: key.clone(),
+                                      value: value.clone(),
+                                  });
+                    }
+                    dump
+                })
+                    .set_query_logic(|state, query| {
+                        let state = state.borrow();
+                        let mut resp = Vec::new();
+                        let &PrototypeQueryType::ValueFor(ref query) = query;
+                        resp.push(match state.get(query) {
+                                      Some(value) => {
+                                          PrototypeKeyValueUpdate::Existing {
+                                              key: query.clone(),
+                                              value: value.clone(),
+                                          }
+                                      }
+                                      None => {
+                                          PrototypeKeyValueUpdate::Removed { key: query.clone() }
+                                      }
+                                  });
+                        resp
                     })
                     .construct();
-            let out_stream = state_operator.get_outgoing_clients_stream()
+            let out_stream = state_operator.get_outgoing_responses_stream()
                                            .inspect(|x| println!("Respond to client: {:?}", x));
             connector.outgoing_stream(out_stream);
             input
@@ -83,8 +99,14 @@ fn main() {
                 while start.elapsed().as_secs() < 5 {
                     root.step();
                 }
-                input.send((1, format!("key_{}", round), 1));
-                input.send((1, "key_sum".to_string(), round));
+                input.send(PrototypeKeyValueUpdate::Existing {
+                               key: format!("key_{}", round),
+                               value: 1,
+                           });
+                input.send(PrototypeKeyValueUpdate::Existing {
+                               key: "key_sum".to_string(),
+                               value: round,
+                           });
                 input.advance_to((round + 1) as u32);
                 root.step();
             }

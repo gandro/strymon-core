@@ -2,23 +2,29 @@ extern crate futures;
 extern crate timely;
 extern crate timely_keepers;
 extern crate timely_query;
+extern crate implementations;
 
 use timely::dataflow::operators::{Input, Inspect};
 
 use timely_keepers::client::KeeperStreamBuilder;
 
+use implementations::{PrototypeQueryType, PrototypeKeyValueUpdate};
+
 fn main() {
     timely_query::execute(|root, coord| {
         let mut input = root.dataflow::<u32, _, _>(|scope| {
-            let (input, stream) = scope.new_input::<String>();
+            let (input, stream) = scope.new_input::<PrototypeKeyValueUpdate<i64>>();
             stream.inspect(|x| println!("Seeing: {:?}", x));
             input
         });
 
-        let query = "key_sum".to_string();
-        let keeper_data = KeeperStreamBuilder::<String, String>::new("PrototypeKeeper", &coord)
-            .query(query)
-            .unwrap();
+        let query = PrototypeQueryType::ValueFor("key_sum".to_string());
+        let keeper_data =
+            KeeperStreamBuilder::<PrototypeQueryType, PrototypeKeyValueUpdate<i64>>::new(
+                "PrototypeKeeper",
+                &coord)
+                    .query(query)
+                    .unwrap();
         let mut round = 0;
         for data in keeper_data {
             round += 1;

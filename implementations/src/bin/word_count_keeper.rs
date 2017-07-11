@@ -8,7 +8,7 @@
 //! This keeper returns key value pairs of the given range of keys.
 //! It understands the following query format:
 //!
-//! `<A>;<SKP>;<EKP>`
+//! `<SKP>;<EKP>`
 //!
 //! `<SKP>` and `<EKP>` stand for, respectively, starting key prefix and ending key prefix. They are
 //! to be used for expressing the range of keys that this query asks for: `[<SKP>, <EKP>)`. The
@@ -22,17 +22,10 @@
 //! * `dog;dog#` - only 'dog' string
 //! * `abba;abba|` - all strings starting with 'abba'
 //!
-//! `<A>` is the action to perform. It can be either `G` for "get" or `U` for "updates". When `G` is
-//! used, the query gets immediate response basing on the current state and connection is closed.
-//! With `U` client subscribes to any upcoming updates to the range of keys it asked for.
-//!
 //! # Response format
 //! In response to a query the keeper returns zero or more tuples of format:
 //!
-//! `<CNT>;<KEY>;<VAL>`
-//!
-//! `<CMT>` is either `1` or `-1` (kinda like in Differential) to signalize that the key-value pair
-//! was, respectively, added or removed from the store.
+//! `<KEY>;<VAL>`
 //!
 //! `<KEY>` and `<VAL>` are the values of the key and value returned from the store.
 //!
@@ -51,41 +44,25 @@ use std::collections::BTreeMap;
 use regex::Regex;
 use timely::dataflow::operators::{Map, UnorderedInput, Inspect};
 use timely::dataflow::channels::message::Content;
-use timely::dataflow::channels::pact::Pipeline;
 use timely_keepers::keeper::{Connector, StateOperatorBuilder};
-use timely_keepers::model::{KeeperQuery, KeeperResponse};
 
-enum QueryType {
-    Get,
-    Update,
-}
-
-fn parse_query(query: &str) -> Option<(QueryType, String, String)> {
+fn parse_query(query: &str) -> Option<(String, String)> {
     lazy_static! {
-        static ref RE_QUERY: Regex = Regex::new("^(G|U);([a-z#|]+);([a-z#|]+)$").unwrap();
+        static ref RE_QUERY: Regex = Regex::new("^([a-z#|]+);([a-z#|]+)$").unwrap();
     }
     let caps = RE_QUERY.captures(query);
 
     match caps {
         Some(caps) => {
-            if caps.len() < 4 {
+            if caps.len() < 3 {
                 return None;
             }
-            let qt = if let Some(action) = caps.get(1) {
-                if action.as_str() == "G" {
-                    QueryType::Get
-                } else {
-                    QueryType::Update
-                }
-            } else {
-                return None;
-            };
-            let start = if let Some(start) = caps.get(2) {
+            let start = if let Some(start) = caps.get(1) {
                 start.as_str()
             } else {
                 return None;
             };
-            let end = if let Some(end) = caps.get(3) {
+            let end = if let Some(end) = caps.get(2) {
                 end.as_str()
             } else {
                 return None;
@@ -94,7 +71,7 @@ fn parse_query(query: &str) -> Option<(QueryType, String, String)> {
                 return None;
             }
 
-            Some((qt, start.to_string(), end.to_string()))
+            Some((start.to_string(), end.to_string()))
         }
         None => None,
     }
@@ -113,7 +90,7 @@ fn main() {
 
             let re_no_alph = Regex::new(r"[^a-z\s]").unwrap();
             let re_space = Regex::new(r"\s+").unwrap();
-//            let text_stream = text_stream.inspect(|x| println!("Data: {:?}", x));
+            //            let text_stream = text_stream.inspect(|x| println!("Data: {:?}", x));
             let word_stream =
                 text_stream.map(move |x| {
                                     re_no_alph.replace_all(x.to_lowercase().trim(), "").to_string()
@@ -122,53 +99,40 @@ fn main() {
                                   re_space.split(&x).map(|s| s.to_string()).collect::<Vec<String>>()
                               });
 
-            let state_operator =
-                StateOperatorBuilder::new(word_count, &word_stream, &clients_stream)
-                    .state_unary_stream(Pipeline, "WordCount", |state, input, output| {
-                        input.for_each(|cap, data| {
-                            let mut state = state.borrow_mut();
-                            for word in data.iter() {
-                                *state.entry(word.to_string()).or_insert(0) += 1;
-                                output.session(&cap).give(word.to_string());
-                            }
-                        });
-                    })
-                    .clients_unary_stream(Pipeline, "WordCountResponder", |state, input, output| {
-                        input.for_each(|cap, data| {
-                            let state = state.borrow();
-                            let mut session = output.session(&cap);
-                            for cq in data.iter() {
-                                let mut response = cq.create_response();
-                                // TODO: this match should dissapear once we get the logic for
-                                // updates
-                                let query = match cq.query() {
-                                    &KeeperQuery::Query(ref q) => q.to_string(),
-                                    _ => "".to_string(),
-                                };
-                                match parse_query(&query) {
-                                    Some((action, start, end)) => {
-                                        match action {
-                                            QueryType::Get => {
-                                                for (key, value) in state.range(start..end) {
-                                                    response.add_tuple(
-                                                        KeeperResponse::Response(format!("{}:{}",
-                                                                                key,
-                                                                                value)));
-                                                }
-                                            }
-                                            QueryType::Update => (),
-                                        }
-                                    }
-                                    // TODO: Insert something here that will end the connection!
-                                    None => (),
+            let state_operator = StateOperatorBuilder::new("WordCountState",
+                                                           word_count,
+                                                           &word_stream,
+                                                           &clients_stream,
+                                                           scope.index(),
+                                                           |state, update| {
+                                                               let mut state = state.borrow_mut();
+                                                               *state.entry(update.to_string())
+                                                                    .or_insert(0) += 1;
+                                                           },
+                                                           |update| vec![update.to_string()],
+                                                           |state| {
+                let state = state.borrow();
+                let mut dump = Vec::new();
+                for (key, value) in state.iter() {
+                    dump.push(format!("{}:{}", key, value));
+                }
+                dump
+            })
+                    .set_query_logic(|state, query| {
+                        let state = state.borrow();
+                        let mut resp = Vec::new();
+                        match parse_query(query) {
+                            Some((start, end)) => {
+                                for (key, value) in state.range(start..end) {
+                                    resp.push(format!("{}:{}", key, value));
                                 }
-
-                                session.give(response);
                             }
-                        });
+                            None => (),
+                        }
+                        resp
                     })
                     .construct();
-            let responses_stream = state_operator.get_outgoing_clients_stream();
+            let responses_stream = state_operator.get_outgoing_responses_stream();
             connector.outgoing_stream(responses_stream);
             input_tuple
         });

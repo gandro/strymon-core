@@ -25,7 +25,7 @@ use timely_system::network::message::abomonate::NonStatic;
 
 use model::{KeeperQuery, KeeperResponse};
 use keeper::messenger::Messenger;
-use keeper::model::{ClientQuery, ClientQueryResponse};
+use keeper::model::{ClientQuery, QueryResponse, QueryResponseType};
 
 /// Helper structure that handles accepting clients' requests and responding to them.
 pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
@@ -36,6 +36,8 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
     acceptor: Arc<Mutex<Spawn<Acceptor<Q, R>>>>,
     in_stream: TimelyStream<Child<'a, S, T>, ClientQuery<Q>>,
     worker_index: usize,
+    // All client that subscribed to receive updates to the state.
+    subscribed_clients: Arc<Mutex<Vec<u64>>>,
 }
 
 // TODO:
@@ -95,6 +97,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                acceptor: acceptor,
                in_stream: stream,
                worker_index: scope.index(),
+               subscribed_clients: Arc::new(Mutex::new(Vec::new())),
            })
     }
 
@@ -111,24 +114,50 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
     }
 
     pub fn outgoing_stream(&mut self,
-                           out_stream: TimelyStream<Child<'a, S, T>, ClientQueryResponse<R>>) {
+                           out_stream: TimelyStream<Child<'a, S, T>, QueryResponse<R>>) {
         let connections = self.connections.clone();
-        out_stream.exchange(|cqr: &ClientQueryResponse<R>| cqr.worker_index() as u64)
-            .inspect(move |cqr| {
-                let idx = cqr.connection_id();
-                let mut connections = connections.lock().unwrap();
-                // TODO do something when client disconnects
-                match connections.entry(idx) {
-                    Entry::Occupied(connection) => {
-                        for response in cqr.response_tuples() {
-                            let _ = connection.get().send_message(response.clone());
+        let subscribed_clients = self.subscribed_clients.clone();
+        out_stream.exchange(|cqr: &QueryResponse<R>| cqr.route_to()).inspect(move |cqr| {
+            let mut subscribed_clients = subscribed_clients.lock().unwrap();
+            let mut connections = connections.lock().unwrap();
+
+            match cqr.response_type() {
+                &QueryResponseType::Broadcast { .. } => {
+                    subscribed_clients.retain(|&idx| {
+                        match connections.entry(idx) {
+                            Entry::Occupied(connection) => {
+                                for response in cqr.response_tuples() {
+                                    if let Err(err) = connection.get()
+                                           .send_message(response.clone()) {
+                                        info!("Disconnected from a client with error: '{}'", err);
+                                        // Something went wrong while communicating with the
+                                        // client, we assume they disconnected.
+                                        connection.remove_entry();
+                                        return false;
+                                    }
+                                }
+                                true
+                            }
+                            Entry::Vacant(_) => false,
                         }
-                        // TODO: stop removing here once we get update semantics
-                        connection.remove_entry();
-                    }
-                    Entry::Vacant(_) => (),
+                    });
                 }
-            });
+                &QueryResponseType::Client { ref client, subscribe } => {
+                    let idx = client.connection_id();
+                    match connections.entry(idx) {
+                        Entry::Occupied(connection) => {
+                            for response in cqr.response_tuples() {
+                                let _ = connection.get().send_message(response.clone());
+                            }
+                        }
+                        Entry::Vacant(_) => (),
+                    }
+                    if subscribe {
+                        subscribed_clients.push(client.connection_id());
+                    }
+                }
+            };
+        });
     }
 
     pub fn register_with_coordinator(&self,
@@ -294,6 +323,8 @@ mod tests {
     use timely_system::network::Network;
     use timely_system::network::message::MessageBuf;
     use timely_system::network::message::abomonate::Abomonate;
+
+    use keeper::model::QueryResponse;
     use model::{KeeperQuery, KeeperResponse};
     use super::{Acceptor, Connector};
 
@@ -349,7 +380,7 @@ mod tests {
                 stream.inspect(|x| println!("got: {:?}", x.query()));
                 let stream =
                     stream.map(|cq| {
-                                   let mut cr = cq.create_response();
+                                   let mut cr = QueryResponse::unicast(&cq, false);
                                    cr.add_tuple(KeeperResponse::Response("Testing".to_string()));
                                    cr
                                });
@@ -359,17 +390,17 @@ mod tests {
             let network = Network::init().unwrap();
             let (client_tx, client_rx) = network.connect(addr).unwrap();
             let client_thread = thread::spawn(move || {
-                let query = "Testing".to_string();
+                let query = KeeperQuery::Query("Testing".to_string());
                 // Send query.
                 let mut buf = MessageBuf::empty();
-                buf.push::<Abomonate, String>(&query).unwrap();
+                buf.push::<Abomonate, KeeperQuery<String>>(&query).unwrap();
                 client_tx.send(buf);
 
                 // Receive reqponse.
                 let resp_buf = client_rx.wait().next().unwrap();
                 let mut resp_buf = resp_buf.unwrap();
-                let resp = resp_buf.pop::<Abomonate, String>().unwrap();
-                assert_eq!(resp, "Testing".to_string());
+                let resp = resp_buf.pop::<Abomonate, KeeperResponse<String>>().unwrap();
+                assert_eq!(resp, KeeperResponse::Response("Testing".to_string()));
             });
 
             while root.step() {}

@@ -345,124 +345,103 @@ fn main() {
             });
 
             let state_operator =
-                StateOperatorBuilder::new(topology, &network_updates, &clients_stream)
-                    .state_unary_stream(Pipeline, "TopologyState", |state, input, output| {
-                        input.for_each(|cap, data| {
-                            let mut state = state.borrow_mut();
-                            for update in data.iter() {
-                                output.session(&cap).give(update.clone());
-                                // Ignoring incorrect updates.
-                                match update {
-                                    &UpdateType::AddHost(ref hname, ref sname) => {
-                                        if let Err(err) = state.add_host(hname, sname) {
-                                            warn!("Adding host update failed: {}", err);
-                                        }
-                                    }
-                                    &UpdateType::AddSwitch(ref sname) => {
-                                        if let Err(err) = state.add_switch(sname) {
-                                            warn!("Adding switch update failed: {}", err);
-                                        }
-                                    }
-                                    &UpdateType::RemoveConnection(ref sname1, ref sname2) => {
-                                        if let Err(err) =
-                                            state.remove_bidir_connection(sname1, sname2) {
-                                            warn!("Removing connection update failed: {}", err);
-                                        }
-                                    }
-                                    &UpdateType::AddBidirConnection(ref sname1,
-                                                                    ref sname2,
-                                                                    ref weight) => {
-                                        if let Err(err) =
-                                            state.add_bidir_connection(sname1,
-                                                                       sname2,
-                                                                       weight.clone()) {
-                                            warn!("Adding connection update failed: {}", err);
-                                        }
+                StateOperatorBuilder::new("TopologyKeeperState",
+                                          topology,
+                                          &network_updates,
+                                          &clients_stream,
+                                          scope.index(),
+                                          |state, update| {
+                    let mut state = state.borrow_mut();
+                    // Ignoring incorrect updates.
+                    match update {
+                        &UpdateType::AddHost(ref hname, ref sname) => {
+                            if let Err(err) = state.add_host(hname, sname) {
+                                warn!("Adding host update failed: {}", err);
+                            }
+                        }
+                        &UpdateType::AddSwitch(ref sname) => {
+                            if let Err(err) = state.add_switch(sname) {
+                                warn!("Adding switch update failed: {}", err);
+                            }
+                        }
+                        &UpdateType::RemoveConnection(ref sname1, ref sname2) => {
+                            if let Err(err) = state.remove_bidir_connection(sname1, sname2) {
+                                warn!("Removing connection update failed: {}", err);
+                            }
+                        }
+                        &UpdateType::AddBidirConnection(ref sname1, ref sname2, ref weight) => {
+                            if let Err(err) =
+                                state.add_bidir_connection(sname1, sname2, weight.clone()) {
+                                warn!("Adding connection update failed: {}", err);
+                            }
+                        }
+                    }
+                },
+                                          // We don't yet support state/update with this keeper so
+                                          // leave those two empty.
+                                          |_| Vec::new(),
+                                          |_| Vec::new())
+                        .set_query_logic(|state, query| {
+                            let state = state.borrow();
+                            let mut response = Vec::new();
+                            match parse_query(query) {
+                                Some(QueryType::GetAllHosts) => {
+                                    for h in state.topology.all_hosts() {
+                                        let ref switch_name =
+                                            state.topology.get_switch(h.switch_id).name;
+                                        response.push(format!("H;{};{}", h.name, switch_name));
                                     }
                                 }
-                            }
-                        });
-                    })
-                    .clients_unary_stream(Pipeline, "TopologyResponder", |state, input, output| {
-                        input.for_each(|cap, data| {
-                            let state = state.borrow();
-                            let mut session = output.session(&cap);
-                            for cq in data.iter() {
-                                let mut response = cq.create_response();
-                                // TODO: this match should dissapear once we get the logic for
-                                // updates
-                                let query = match cq.query() {
-                                    &KeeperQuery::Query(ref q) => q.to_string(),
-                                    _ => "".to_string(),
-                                };
-                                match parse_query(&query) {
-                                    Some(QueryType::GetAllHosts) => {
-                                        for h in state.topology.all_hosts() {
-                                            let ref switch_name =
-                                                state.topology.get_switch(h.switch_id).name;
-                                            response.add_tuple(
-                                                KeeperResponse::Response(format!("H;{};{}",
-                                                                         h.name,
-                                                                         switch_name)));
-                                        }
+                                Some(QueryType::GetAllSwitches) => {
+                                    for s in state.topology.all_switches() {
+                                        response.push(format!("S;{}", s.name));
                                     }
-                                    Some(QueryType::GetAllSwitches) => {
-                                        for s in state.topology.all_switches() {
-                                            response.add_tuple(
-                                                KeeperResponse::Response(format!("S;{}", s.name)));
-                                        }
+                                }
+                                Some(QueryType::GetAllConnections) => {
+                                    for c in state.topology.all_connections() {
+                                        let ref s1_name = state.topology.get_switch(c.from).name;
+                                        let ref s2_name = state.topology.get_switch(c.to).name;
+                                        response.push(format!("C;{};{};{};{}",
+                                                              s1_name,
+                                                              s2_name,
+                                                              c.weight,
+                                                              1));
                                     }
-                                    Some(QueryType::GetAllConnections) => {
-                                        for c in state.topology.all_connections() {
-                                            let ref s1_name =
-                                                state.topology.get_switch(c.from).name;
-                                            let ref s2_name = state.topology.get_switch(c.to).name;
-                                            response.add_tuple(
-                                                KeeperResponse::Response(format!("C;{};{};{};{}",
-                                                                        s1_name,
-                                                                        s2_name,
-                                                                        c.weight,
-                                                                        1)));
-                                        }
-                                    }
-                                    Some(QueryType::IsConnected(sname1, sname2)) => {
-                                        let mut is_conn = 0;
-                                        let mut weight = 0;
-                                        loop {
-                                            let s1_id = match state.get_switch_node_id(&sname1) {
-                                                Ok(id) => id,
-                                                Err(_) => break,
-                                            };
-                                            let s2_id = match state.get_switch_node_id(&sname2) {
-                                                Ok(id) => id,
-                                                Err(_) => break,
-                                            };
-                                            if state.topology.is_connected(s1_id, s2_id) {
-                                                is_conn = 1;
-                                            } else {
-                                                break;
-                                            }
-                                            if let Ok(conn) = state.get_connection(s1_id, s2_id) {
-                                                weight = conn.weight;
-                                            }
+                                }
+                                Some(QueryType::IsConnected(sname1, sname2)) => {
+                                    let mut is_conn = 0;
+                                    let mut weight = 0;
+                                    loop {
+                                        let s1_id = match state.get_switch_node_id(&sname1) {
+                                            Ok(id) => id,
+                                            Err(_) => break,
+                                        };
+                                        let s2_id = match state.get_switch_node_id(&sname2) {
+                                            Ok(id) => id,
+                                            Err(_) => break,
+                                        };
+                                        if state.topology.is_connected(s1_id, s2_id) {
+                                            is_conn = 1;
+                                        } else {
                                             break;
                                         }
-                                        response.add_tuple(
-                                            KeeperResponse::Response(format!("C;{};{};{};{}",
-                                                                    sname1,
-                                                                    sname2,
-                                                                    weight,
-                                                                    is_conn)));
+                                        if let Ok(conn) = state.get_connection(s1_id, s2_id) {
+                                            weight = conn.weight;
+                                        }
+                                        break;
                                     }
-                                    None => response.add_tuple(KeeperResponse::ConnectionEnd),
+                                    response.push(format!("C;{};{};{};{}",
+                                                          sname1,
+                                                          sname2,
+                                                          weight,
+                                                          is_conn));
                                 }
-
-                                session.give(response);
+                                None => (),
                             }
-                        });
-                    })
-                    .construct();
-            let responses_stream = state_operator.get_outgoing_clients_stream();
+                            response
+                        })
+                        .construct();
+            let responses_stream = state_operator.get_outgoing_responses_stream();
             connector.outgoing_stream(responses_stream);
             input_tuple
         });

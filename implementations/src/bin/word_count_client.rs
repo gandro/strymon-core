@@ -28,7 +28,7 @@ fn main() {
                                            input
                                        });
 
-        let query = format!("G;{};{}", range_start, range_end);
+        let query = format!("{};{}", range_start, range_end);
         let keeper_data = KeeperStreamBuilder::<String, String>::new("WordCountKeeper", &coord)
             .query(query)
             .unwrap();

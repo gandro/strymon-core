@@ -9,6 +9,22 @@ pub enum StateRequest {
     StateAndUpdates,
 }
 
+impl StateRequest {
+    pub fn subscribe(&self) -> bool {
+        match self {
+            &StateRequest::JustState => false,
+            _ => true,
+        }
+    }
+
+    pub fn state(&self) -> bool {
+        match self {
+            &StateRequest::JustUpdates => false,
+            _ => true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
 pub enum KeeperQuery<Q> 
     where Q: Abomonation + Any + Clone + NonStatic

@@ -1,158 +1,174 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::vec::Vec;
 
-use timely;
+use abomonation::Abomonation;
 use timely::dataflow::{Scope, Stream};
-use timely::dataflow::operators::{Unary, InputHandle, OutputHandle, Notificator};
-use timely::dataflow::channels::pact::ParallelizationContract;
-use timely::dataflow::channels::pushers::tee::Tee;
+use timely::dataflow::operators::{Concat, Unary, Map as TimelyMap};
+use timely::dataflow::channels::pact::Pipeline;
+use timely_system::network::message::abomonate::NonStatic;
+
+use keeper::model::{ClientQuery, QueryResponse};
+use model::{KeeperQuery, KeeperResponse};
 
 /// StateOperator
 /// Can be constructed using StateOperatorBuilder.
-pub struct StateOperator<T: 'static, G: Scope, DS, DC>
-    where DS: timely::Data,
-          DC: timely::Data
+pub struct StateOperator<G: Scope, DQ>
+    where DQ: Abomonation + Any + Clone + NonStatic + Send // Type of outgoing stream.
 {
-    out_state_stream: Stream<G, DS>,
-    out_clients_stream: Stream<G, DC>,
-    //TODO delete state if we end up not using it.
-    #[allow(dead_code)]
-    state: Rc<RefCell<T>>,
+    out_stream: Stream<G, QueryResponse<DQ>>,
 }
 
-impl<T: 'static, G: Scope, DS, DC> StateOperator<T, G, DS, DC>
-    where DS: timely::Data,
-          DC: timely::Data
+impl<G: Scope, DQ> StateOperator<G, DQ>
+    where DQ: Abomonation + Any + Clone + NonStatic + Send
 {
-    pub fn get_outgoing_state_stream(&self) -> Stream<G, DS> {
-        self.out_state_stream.clone()
+    pub fn get_outgoing_responses_stream(&self) -> Stream<G, QueryResponse<DQ>> {
+        self.out_stream.clone()
     }
-    pub fn get_outgoing_clients_stream(&self) -> Stream<G, DC> {
-        self.out_clients_stream.clone()
-    }
+}
+
+#[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
+enum UpdateOrQuery<U, Q>
+    where U: Abomonation + Any + Clone + NonStatic,
+          Q: Abomonation + Any + Clone + NonStatic
+{
+    Update(U),
+    Query(Q),
 }
 
 /// TODO Document what all the type parameters stand for.
-///
-/// Methods of this builder will panic if any of the invariants it assumes are not kept.
-/// Invariants:
-///  - call to construct can happen only when both client and state streams have an unary operator
-///  defined on them (either stream or notify)
-///  - call to (state|clients)_unary_(stream|notify) can happen only once for state and once for
-///  clients
-pub struct StateOperatorBuilder<T: 'static, G: Scope, DS, DS1, DC, DC1>
-    where DS: timely::Data,
-          DS1: timely::Data,
-          DC: timely::Data,
-          DC1: timely::Data
+pub struct StateOperatorBuilder<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope, LS, LDS, LC, LUT>
+    where DS: Abomonation + Any + Clone + NonStatic, // Type of data in incoming state stream.
+          DQ: Abomonation + Any + Clone + NonStatic, // Type of data in incoming updates stream.
+          DQ1: Abomonation + Any + Clone + NonStatic + Send, // Type of data in outcoming stream.
+          LS: FnMut(Rc<RefCell<T>>, &DS) + 'static,
+          LDS: FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static,
+          LC: FnMut(Rc<RefCell<T>>, &DQ) -> Vec<DQ1> + 'static,
+          LUT: FnMut(&DS) -> Vec<DQ1> + 'static
 {
-    in_state_stream: Stream<G, DS>,
-    in_clients_stream: Stream<G, DC>,
-    out_state_stream: Option<Stream<G, DS1>>,
-    out_clients_stream: Option<Stream<G, DC1>>,
+    name: &'a str,
+    in_state_stream: &'a Stream<G, DS>,
+    in_query_stream: &'a Stream<G, ClientQuery<DQ>>,
+    worker_index: usize,
+    state_logic: LS,
+    dump_state_logic: LDS,
+    update_transform_logic: LUT,
+    query_logic: Option<LC>,
     state: Rc<RefCell<T>>,
 }
 
-impl<T: 'static, G: Scope, DS, DS1, DC, DC1> StateOperatorBuilder<T, G, DS, DS1, DC, DC1>
-    where DS: timely::Data,
-          DS1: timely::Data,
-          DC: timely::Data,
-          DC1: timely::Data
+impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope, LS, LDS, LC, LUT>
+            StateOperatorBuilder<'a, DS, DQ, DQ1, T, G, LS, LDS, LC, LUT>
+    where DS: Abomonation + Any + Clone + NonStatic, // Type of data in incoming state stream.
+          DQ: Abomonation + Any + Clone + NonStatic, // Type of data in incoming updates stream.
+          DQ1: Abomonation + Any + Clone + NonStatic + Send, // Type of data in outcoming stream.
+          LS: FnMut(Rc<RefCell<T>>, &DS) + 'static,
+          LDS: FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static,
+          LC: FnMut(Rc<RefCell<T>>, &DQ) -> Vec<DQ1> + 'static,
+          LUT: FnMut(&DS) -> Vec<DQ1> + 'static
 {
-    pub fn new(state: T, state_stream: &Stream<G, DS>, clients_stream: &Stream<G, DC>) -> Self {
+    pub fn new(name: &'a str,
+               state: T,
+               state_stream: &'a Stream<G, DS>,
+               query_stream: &'a Stream<G, ClientQuery<DQ>>,
+               worker_index: usize,
+               state_logic: LS,
+               update_transform_logic: LUT,
+               dump_state_logic: LDS)
+               -> Self {
         StateOperatorBuilder {
-            in_state_stream: state_stream.clone(),
-            in_clients_stream: clients_stream.clone(),
+            name: name,
+            in_state_stream: state_stream,
+            in_query_stream: query_stream,
+            worker_index: worker_index,
+            state_logic: state_logic,
+            dump_state_logic: dump_state_logic,
+            update_transform_logic: update_transform_logic,
+            query_logic: None,
             state: Rc::new(RefCell::new(state)),
-            out_state_stream: None,
-            out_clients_stream: None,
         }
     }
 
-    pub fn construct(self) -> StateOperator<T, G, DS1, DC1> {
-        assert!(self.out_state_stream.is_some() && self.out_clients_stream.is_some());
-        StateOperator {
-            out_state_stream: self.out_state_stream.unwrap(),
-            out_clients_stream: self.out_clients_stream.unwrap(),
-            state: self.state,
-        }
-    }
-
-    pub fn state_unary_stream<P, L>(mut self, pact: P, name: &str, mut logic: L) -> Self
-        where L: FnMut(Rc<RefCell<T>>,
-                       &mut InputHandle<G::Timestamp, DS>,
-                       &mut OutputHandle<G::Timestamp, DS1, Tee<G::Timestamp, DS1>>) + 'static,
-              P: ParallelizationContract<G::Timestamp, DS>
-    {
-        assert!(self.out_state_stream.is_none());
+    pub fn construct(self) -> StateOperator<G, DQ1> {
+        let in_state = self.in_state_stream.map(|x| UpdateOrQuery::Update(x));
+        let in_query = self.in_query_stream.map(|x| UpdateOrQuery::Query(x));
+        let inputs = in_state.concat(&in_query);
         let state = self.state.clone();
-        let out_stream = self.in_state_stream.unary_stream(pact, name, move |input, output| {
-            logic(state.clone(), input, output)
-        });
-        self.out_state_stream = Some(out_stream);
-        self
-    }
 
-    pub fn state_unary_notify<P, L>(mut self,
-                                    pact: P,
-                                    name: &str,
-                                    init: Vec<G::Timestamp>,
-                                    mut logic: L)
-                                    -> Self
-        where L: FnMut(Rc<RefCell<T>>,
-                       &mut InputHandle<G::Timestamp, DS>,
-                       &mut OutputHandle<G::Timestamp, DS1, Tee<G::Timestamp, DS1>>,
-                       &mut Notificator<G::Timestamp>) + 'static,
-              P: ParallelizationContract<G::Timestamp, DS>
-    {
-        assert!(self.out_state_stream.is_none());
-        let state = self.state.clone();
-        let out_stream =
-            self.in_state_stream.unary_notify(pact,
-                                              name,
-                                              init,
-                                              move |input, output, notificator| {
-                                                  logic(state.clone(), input, output, notificator)
-                                              });
-        self.out_state_stream = Some(out_stream);
-        self
-    }
+        let worker_index = self.worker_index;
+        let mut state_logic = self.state_logic;
+        let mut dump_state_logic = self.dump_state_logic;
+        let mut update_transform_logic = self.update_transform_logic;
+        let mut query_logic = self.query_logic;
 
-    pub fn clients_unary_stream<P, L>(mut self, pact: P, name: &str, mut logic: L) -> Self
-        where L: FnMut(Rc<RefCell<T>>,
-                       &mut InputHandle<G::Timestamp, DC>,
-                       &mut OutputHandle<G::Timestamp, DC1, Tee<G::Timestamp, DC1>>) + 'static,
-              P: ParallelizationContract<G::Timestamp, DC>
-    {
-        assert!(self.out_clients_stream.is_none());
-        let state = self.state.clone();
-        let out_stream = self.in_clients_stream.unary_stream(pact, name, move |input, output| {
-            logic(state.clone(), input, output)
-        });
-        self.out_clients_stream = Some(out_stream);
-        self
-    }
-
-    pub fn clients_unary_notify<P, L>(mut self,
-                                      pact: P,
-                                      name: &str,
-                                      init: Vec<G::Timestamp>,
-                                      mut logic: L)
-                                      -> Self
-        where L: FnMut(Rc<RefCell<T>>,
-                       &mut InputHandle<G::Timestamp, DC>,
-                       &mut OutputHandle<G::Timestamp, DC1, Tee<G::Timestamp, DC1>>,
-                       &mut Notificator<G::Timestamp>) + 'static,
-              P: ParallelizationContract<G::Timestamp, DC>
-    {
-        assert!(self.out_clients_stream.is_none());
-        let state = self.state.clone();
-        let out_stream = self.in_clients_stream
-            .unary_notify(pact, name, init, move |input, output, notificator| {
-                logic(state.clone(), input, output, notificator)
+        let outputs = inputs.unary_stream(Pipeline, self.name, move |input, output| {
+            input.for_each(|cap, data| {
+                for msg in data.iter() {
+                    let mut msg = msg.clone();
+                    let response = match msg {
+                        UpdateOrQuery::Update(ref mut u) => {
+                            // Update the state.
+                            state_logic(state.clone(), u);
+                            // Produce broadcast message to all clients that subscribed to
+                            // updates.
+                            let mut response = QueryResponse::broadcast(worker_index);
+                            response.append_tuples(&mut update_transform_logic(u)
+                                                            .into_iter()
+                                                            .map(|x| {
+                                                                     KeeperResponse::Response(x)
+                                                                 })
+                                                            .collect());
+                            response.add_tuple(KeeperResponse::BatchEnd);
+                            response
+                        }
+                        UpdateOrQuery::Query(ref q) => {
+                            match q.query() {
+                                &KeeperQuery::StateRq(ref req) => {
+                                    let mut response = QueryResponse::unicast(q, req.subscribe());
+                                    if req.state() {
+                                        response.append_tuples(
+                                                & mut dump_state_logic(state.clone())
+                                                    .into_iter()
+                                                    .map(|x| KeeperResponse::Response(x))
+                                                    .collect()
+                                            );
+                                        response.add_tuple(KeeperResponse::BatchEnd);
+                                    }
+                                    response
+                                }
+                                &KeeperQuery::Query(ref query) => {
+                                    let mut response = QueryResponse::unicast(q, false);
+                                    match &mut query_logic {
+                                        &mut Some(ref mut logic) => {
+                                            response.append_tuples(
+                                                    & mut logic(state.clone(), query)
+                                                        .into_iter()
+                                                        .map(|x| KeeperResponse::Response(x))
+                                                        .collect()
+                                                );
+                                            response.add_tuple(KeeperResponse::BatchEnd);
+                                        }
+                                        _ => {
+                                            // Currently we are just dropping incorrectly
+                                            // formatted queries so we do it here as well
+                                            // (empty tuple list means no response is sent).
+                                        }
+                                    }
+                                    response
+                                }
+                            }
+                        }
+                    };
+                    output.session(&cap).give(response);
+                }
             });
-        self.out_clients_stream = Some(out_stream);
+        });
+        StateOperator { out_stream: outputs }
+    }
+
+    pub fn set_query_logic(mut self, query_logic: LC) -> Self {
+        self.query_logic = Some(query_logic);
         self
     }
 }
@@ -161,10 +177,9 @@ impl<T: 'static, G: Scope, DS, DS1, DC, DC1> StateOperatorBuilder<T, G, DS, DS1,
 mod tests {
     use timely;
     use timely::dataflow::operators::{ToStream, Inspect};
-    use timely::dataflow::channels::pact::Pipeline;
 
     use keeper::model::ClientQuery;
-    use model::{KeeperQuery, KeeperResponse};
+    use model::{StateRequest, KeeperQuery};
     use super::StateOperatorBuilder;
 
     /// This tests if the API works. There are no asserts in here, but if it doesn't compile or
@@ -174,38 +189,35 @@ mod tests {
     #[test]
     fn test() {
         timely::example(|scope| {
-            let empty_query = KeeperQuery::Query(String::new());
-            let client_stream = vec![ClientQuery::new(empty_query.clone(), 0, 0),
-                                     ClientQuery::new(empty_query.clone(), 0, 0)]
+            let client_stream = vec![
+                     ClientQuery::new(KeeperQuery::StateRq(StateRequest::StateAndUpdates), 0, 0),
+                     ClientQuery::new(KeeperQuery::StateRq(StateRequest::JustState), 0, 0),
+                     ClientQuery::new(KeeperQuery::Query(String::new()), 0, 0)]
                     .to_stream(scope);
             let input_stream = (0..10).to_stream(scope);
 
-            let state_operator = StateOperatorBuilder::new(0 as u64, &input_stream, &client_stream)
-                .state_unary_stream(Pipeline, "StateBuilder", |state, input, output| {
-                    input.for_each(|cap, data| {
-                        let mut st = state.borrow_mut();
-                        let mut session = output.session(&cap);
-                        for &d in data.iter() {
-                            *st += d;
-                            session.give(d);
-                        }
-                    });
-                })
-                .clients_unary_stream(Pipeline, "ClientAnswerer", |state, input, output| {
-                    input.for_each(|cap, data| {
-                        let st = state.borrow();
-                        let mut session = output.session(&cap);
-                        for d in data.iter() {
-                            let mut resp = d.create_response();
-                            resp.add_tuple(KeeperResponse::Response((*st).to_string()));
-                            session.give(resp);
-                        }
-                    });
-                })
-                .construct();
+            let state_operator =
+                StateOperatorBuilder::new("StateTest",
+                                          0 as u64,
+                                          &input_stream,
+                                          &client_stream,
+                                          scope.index(),
+                                          |state, d| {
+                                              // State logic.
+                                              let mut state = state.borrow_mut();
+                                              *state += *d;
+                                          },
+                                          |update| vec![format!("Update: '{:?}'", update)],
+                                          |state| {
+                                              // Dump state logic.
+                                              vec![format!("Dump state: {:?}", state.borrow())]
+                                          })
+                        .set_query_logic(|_, query| {
+                                             vec![format!("Query logic response: {:?}", query)]
+                                         })
+                        .construct();
 
-            state_operator.get_outgoing_state_stream().inspect(|x| println!("State: {}", x));
-            state_operator.get_outgoing_clients_stream().inspect(|x| println!("Clients: {:?}", x));
+            state_operator.get_outgoing_responses_stream().inspect(|x| println!("Out: '{:?}'", x));
         });
     }
 }

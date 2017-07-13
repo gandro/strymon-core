@@ -6,7 +6,7 @@ extern crate implementations;
 
 use timely::dataflow::operators::{Input, Inspect};
 
-use timely_keepers::client::KeeperStreamBuilder;
+use timely_keepers::client::KeeperConnection;
 
 use implementations::{PrototypeQueryType, PrototypeKeyValueUpdate};
 
@@ -20,7 +20,7 @@ fn main() {
 
         let query = PrototypeQueryType::ValueFor("key_sum".to_string());
         let keeper_data =
-            KeeperStreamBuilder::<PrototypeQueryType, PrototypeKeyValueUpdate<i64>>::new(
+            KeeperConnection::<PrototypeQueryType, PrototypeKeyValueUpdate<i64>>::new(
                 "PrototypeKeeper",
                 &coord)
                     .query(query)

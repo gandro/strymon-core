@@ -44,9 +44,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use topology_model::topology::{Connection, Host, Switch, NodeId, LinkId, LinkWeight, Topology};
 use timely_keepers::keeper::{Connector, StateOperatorBuilder};
-use timely_keepers::model::{KeeperQuery, KeeperResponse};
 use timely::dataflow::channels::message::Content;
-use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::{Map, UnorderedInput, Inspect};
 
 #[derive(Abomonation, Clone, Debug, PartialEq)]

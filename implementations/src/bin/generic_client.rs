@@ -5,7 +5,7 @@ extern crate timely_query;
 
 use clap::App;
 use timely::dataflow::operators::{Input, Inspect};
-use timely_keepers::client::KeeperStreamBuilder;
+use timely_keepers::client::KeeperConnection;
 
 fn main() {
     let cmd_args = App::new("generic_client")
@@ -25,7 +25,7 @@ fn main() {
                                        });
 
         let query = query.clone();
-        let keeper_data = KeeperStreamBuilder::<String, String>::new(&keeper, &coord)
+        let keeper_data = KeeperConnection::<String, String>::new(&keeper, &coord)
             .query(query)
             .unwrap();
         let mut round = 0;

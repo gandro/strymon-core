@@ -36,17 +36,12 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
     acceptor: Arc<Mutex<Spawn<Acceptor<Q, R>>>>,
     in_stream: TimelyStream<Child<'a, S, T>, ClientQuery<Q>>,
     worker_index: usize,
-    // All client that subscribed to receive updates to the state.
+    // All clients that subscribed to receive updates to the state.
     subscribed_clients: Arc<Mutex<Vec<u64>>>,
 }
 
 // TODO:
 //  - make Coordinator aware of multiple workers (and thus multiple copies of the same Keeper)
-//  - add statistics of what has been removed
-//  - keep something more complicated in connections
-//
-//  - work only on worker 0
-//  - split this file into multiple smaller
 
 
 impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>

@@ -4,6 +4,7 @@ extern crate abomonation_derive;
 extern crate log;
 #[macro_use]
 extern crate futures;
+#[macro_use]
 extern crate abomonation;
 extern crate timely_system;
 extern crate timely;

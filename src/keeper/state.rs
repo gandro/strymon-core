@@ -38,53 +38,48 @@ enum UpdateOrQuery<U, Q>
 }
 
 /// TODO Document what all the type parameters stand for.
-pub struct StateOperatorBuilder<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope, LS, LDS, LC, LUT>
+pub struct StateOperatorBuilder<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope>
     where DS: Abomonation + Any + Clone + NonStatic, // Type of data in incoming state stream.
           DQ: Abomonation + Any + Clone + NonStatic, // Type of data in incoming updates stream.
-          DQ1: Abomonation + Any + Clone + NonStatic + Send, // Type of data in outcoming stream.
-          LS: FnMut(Rc<RefCell<T>>, &DS) + 'static,
-          LDS: FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static,
-          LC: FnMut(Rc<RefCell<T>>, &DQ) -> Vec<DQ1> + 'static,
-          LUT: FnMut(&DS) -> Vec<DQ1> + 'static
+          DQ1: Abomonation + Any + Clone + NonStatic + Send // Type of data in outgoing stream.
 {
     name: &'a str,
     in_state_stream: &'a Stream<G, DS>,
     in_query_stream: &'a Stream<G, ClientQuery<DQ>>,
     worker_index: usize,
-    state_logic: LS,
-    dump_state_logic: LDS,
-    update_transform_logic: LUT,
-    query_logic: Option<LC>,
+    state_logic: Box<FnMut(Rc<RefCell<T>>, &DS) + 'static>,
+    dump_state_logic: Box<FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static>,
+    update_transform_logic: Box<FnMut(&DS) -> Vec<DQ1> + 'static>,
+    query_logic: Option<Box<FnMut(Rc<RefCell<T>>, &DQ) -> Vec<DQ1> + 'static>>,
     state: Rc<RefCell<T>>,
 }
 
-impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope, LS, LDS, LC, LUT>
-            StateOperatorBuilder<'a, DS, DQ, DQ1, T, G, LS, LDS, LC, LUT>
+impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ, DQ1, T, G>
     where DS: Abomonation + Any + Clone + NonStatic, // Type of data in incoming state stream.
           DQ: Abomonation + Any + Clone + NonStatic, // Type of data in incoming updates stream.
-          DQ1: Abomonation + Any + Clone + NonStatic + Send, // Type of data in outcoming stream.
-          LS: FnMut(Rc<RefCell<T>>, &DS) + 'static,
-          LDS: FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static,
-          LC: FnMut(Rc<RefCell<T>>, &DQ) -> Vec<DQ1> + 'static,
-          LUT: FnMut(&DS) -> Vec<DQ1> + 'static
+          DQ1: Abomonation + Any + Clone + NonStatic + Send
 {
-    pub fn new(name: &'a str,
-               state: T,
-               state_stream: &'a Stream<G, DS>,
-               query_stream: &'a Stream<G, ClientQuery<DQ>>,
-               worker_index: usize,
-               state_logic: LS,
-               update_transform_logic: LUT,
-               dump_state_logic: LDS)
-               -> Self {
+    pub fn new<LS, LUT, LDS>(name: &'a str,
+                             state: T,
+                             state_stream: &'a Stream<G, DS>,
+                             query_stream: &'a Stream<G, ClientQuery<DQ>>,
+                             worker_index: usize,
+                             state_logic: LS,
+                             update_transform_logic: LUT,
+                             dump_state_logic: LDS)
+                             -> Self
+        where LS: FnMut(Rc<RefCell<T>>, &DS) + 'static,
+              LDS: FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static,
+              LUT: FnMut(&DS) -> Vec<DQ1> + 'static
+    {
         StateOperatorBuilder {
             name: name,
             in_state_stream: state_stream,
             in_query_stream: query_stream,
             worker_index: worker_index,
-            state_logic: state_logic,
-            dump_state_logic: dump_state_logic,
-            update_transform_logic: update_transform_logic,
+            state_logic: Box::new(state_logic),
+            dump_state_logic: Box::new(dump_state_logic),
+            update_transform_logic: Box::new(update_transform_logic),
             query_logic: None,
             state: Rc::new(RefCell::new(state)),
         }
@@ -167,8 +162,10 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope, LS, LDS, LC, LUT>
         StateOperator { out_stream: outputs }
     }
 
-    pub fn set_query_logic(mut self, query_logic: LC) -> Self {
-        self.query_logic = Some(query_logic);
+    pub fn set_query_logic<LC>(mut self, query_logic: LC) -> Self
+        where LC: FnMut(Rc<RefCell<T>>, &DQ) -> Vec<DQ1> + 'static
+    {
+        self.query_logic = Some(Box::new(query_logic));
         self
     }
 }

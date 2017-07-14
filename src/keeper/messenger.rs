@@ -78,13 +78,13 @@ impl<I, O> Stream for Messenger<I, O>
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match try_ready!(self.rx.poll()) {
+        Ok(Async::Ready(match try_ready!(self.rx.poll()) {
             Some(mut buf) => {
                 let msg = buf.pop::<Abomonate, I>().map_err(Into::<io::Error>::into)?;
-                Ok(Async::Ready(Some(msg)))
+                Some(msg)
             }
-            None => Ok(Async::Ready(None)),
+            None => None,
 
-        }
+        }))
     }
 }

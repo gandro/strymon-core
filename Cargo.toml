@@ -6,7 +6,7 @@ authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
 [dependencies]
 abomonation = "0.4.4"
 abomonation_derive = "0.1.2"
-futures = "0.1.13"
+futures = "0.1.14"
 timely = "0.2.0"
 tokio-core = "0.1.6"
 log = "0.3.7"

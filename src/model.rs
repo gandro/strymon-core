@@ -41,3 +41,9 @@ pub enum KeeperResponse<R>
     BatchEnd,
     ConnectionEnd,
 }
+
+/// Empty query type for Keepers that do not support adhoc queries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EmptyQT {}
+
+unsafe_abomonate!(EmptyQT);

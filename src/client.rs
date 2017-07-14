@@ -1,5 +1,5 @@
 //! Client library for querying Keeper state.
-//! 
+//!
 //! Each Keeper exposes an interface for a read-only access to its state. At the minimum it allows
 //! clients to request a "dump" of its state, subscribe to updates to the state or both at once.
 //! Those queries can be performed calling `state` method on `KeeperConnection` object with
@@ -9,7 +9,7 @@
 //! method on the `KeeperConnection` object.
 //! Note, that a Keeper's client needs to be compiled together with the Keeper typically, until we
 //! stop using Abomonation.
-//! 
+//!
 //! `KeeperStream` object represents a stream of tuples produced by a Keeper in response to a query
 //! or a state request. In case of a single state dump or an adhoc query the stream is a one-off
 //! batch of tuples. When a client subscribes to updates though, the stream is infinite - each
@@ -18,7 +18,7 @@
 //! they should use `state_with_batch_markers` method.
 //! `KeeperStream` implements both Iterator and futures' Stream so it can be iterated over in the
 //! fashion that suits the user the best.
-//! 
+//!
 use std::any::Any;
 use std::io;
 use std::marker::PhantomData;
@@ -158,20 +158,23 @@ impl<Q, R, O> Stream for KeeperStream<Q, R, O>
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let value = match self.messenger.as_mut() {
-            Some(msgr) => try_ready!(msgr.poll()),
-            None => return Ok(Async::Ready(None)),
-        };
+        loop {
+            let value = match self.messenger.as_mut() {
+                Some(msgr) => try_ready!(msgr.poll()),
+                None => return Ok(Async::Ready(None)),
+            };
 
-        let ret = match value {
-            Some(resp) => (self.convert_element_fn)(resp),
-            None => Async::Ready(None),
-        };
-        match ret {
-            Async::Ready(None) => drop(self.messenger.take()),
-            _ => ()
-        };
-        Ok(ret)
+            let ret = match value {
+                Some(resp) => (self.convert_element_fn)(resp),
+                None => Async::Ready(None),
+            };
+            match ret {
+                Async::Ready(None) => drop(self.messenger.take()),
+                Async::NotReady => continue,
+                _ => (),
+            };
+            return Ok(ret);
+        }
     }
 }
 

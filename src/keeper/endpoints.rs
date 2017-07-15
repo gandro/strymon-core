@@ -12,7 +12,7 @@ use futures::stream::{Stream, Fuse};
 use futures::executor::{spawn, Spawn, Unpark};
 use timely::dataflow::{ScopeParent, Stream as TimelyStream};
 //use timely::dataflow::Stream as TimelyStream;
-use timely::dataflow::operators::Inspect;
+use timely::dataflow::operators::{Inspect, Map};
 use timely::dataflow::operators::exchange::Exchange;
 use timely::dataflow::operators::operator::source;
 use timely::dataflow::scopes::child::Child;
@@ -36,6 +36,7 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
     acceptor: Arc<Mutex<Spawn<Acceptor<Q, R>>>>,
     in_stream: TimelyStream<Child<'a, S, T>, ClientQuery<Q>>,
     worker_index: usize,
+    workers_num: usize,
     // All clients that subscribed to receive updates to the state.
     subscribed_clients: Arc<Mutex<Vec<u64>>>,
 }
@@ -92,6 +93,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                acceptor: acceptor,
                in_stream: stream,
                worker_index: scope.index(),
+               workers_num: scope.peers(),
                subscribed_clients: Arc::new(Mutex::new(Vec::new())),
            })
     }
@@ -112,47 +114,64 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                            out_stream: TimelyStream<Child<'a, S, T>, QueryResponse<R>>) {
         let connections = self.connections.clone();
         let subscribed_clients = self.subscribed_clients.clone();
-        out_stream.exchange(|cqr: &QueryResponse<R>| cqr.route_to()).inspect(move |cqr| {
-            let mut subscribed_clients = subscribed_clients.lock().unwrap();
-            let mut connections = connections.lock().unwrap();
+        let workers_num = self.workers_num.clone();
+        out_stream.flat_map(move |cqr: QueryResponse<R>| {
+                // If we get broadcast response, copy it over to all workers.
+                let mut resp = Vec::new();
+                if cqr.is_broadcast() {
+                    for x in 0..workers_num {
+                        let mut cloned = cqr.clone();
+                        cloned.set_worker_idx(x);
+                        resp.push(cloned);
+                    }
+                } else {
+                    resp.push(cqr);
+                }
+                resp
+            })
+            .exchange(|cqr: &QueryResponse<R>| cqr.route_to())
+            .inspect(move |cqr| {
+                let mut subscribed_clients = subscribed_clients.lock().unwrap();
+                let mut connections = connections.lock().unwrap();
 
-            match cqr.response_type() {
-                &QueryResponseType::Broadcast { .. } => {
-                    subscribed_clients.retain(|&idx| {
+                match cqr.response_type() {
+                    &QueryResponseType::Broadcast { .. } => {
+                        subscribed_clients.retain(|&idx| {
+                            match connections.entry(idx) {
+                                Entry::Occupied(connection) => {
+                                    for response in cqr.response_tuples() {
+                                        if let Err(err) = connection.get()
+                                               .send_message(response.clone()) {
+                                            info!("Disconnected from a client with error: '{}'",
+                                                  err);
+                                            // Something went wrong while communicating with the
+                                            // client, we assume they disconnected.
+                                            connection.remove_entry();
+                                            return false;
+                                        }
+                                    }
+                                    true
+                                }
+                                Entry::Vacant(_) => false,
+                            }
+                        });
+                    }
+                    &QueryResponseType::Client { ref client, subscribe } => {
+                        let idx = client.connection_id();
                         match connections.entry(idx) {
                             Entry::Occupied(connection) => {
                                 for response in cqr.response_tuples() {
-                                    if let Err(err) = connection.get()
-                                           .send_message(response.clone()) {
-                                        info!("Disconnected from a client with error: '{}'", err);
-                                        // Something went wrong while communicating with the
-                                        // client, we assume they disconnected.
-                                        connection.remove_entry();
-                                        return false;
-                                    }
+                                    let _ = connection.get().send_message(response.clone());
                                 }
-                                true
                             }
-                            Entry::Vacant(_) => false,
+                            Entry::Vacant(_) => (),
                         }
-                    });
-                }
-                &QueryResponseType::Client { ref client, subscribe } => {
-                    let idx = client.connection_id();
-                    match connections.entry(idx) {
-                        Entry::Occupied(connection) => {
-                            for response in cqr.response_tuples() {
-                                let _ = connection.get().send_message(response.clone());
-                            }
+                        if subscribe {
+                            subscribed_clients.push(client.connection_id());
                         }
-                        Entry::Vacant(_) => (),
                     }
-                    if subscribe {
-                        subscribed_clients.push(client.connection_id());
-                    }
-                }
-            };
-        });
+                };
+            });
     }
 
     pub fn register_with_coordinator(&self,

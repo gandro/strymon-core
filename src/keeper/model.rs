@@ -79,10 +79,10 @@ impl<D> QueryResponse<D>
 {
     /// Creates a broadcast response. Such a message is to be sent to all subscribed clients, it is
     /// not tied to a specific one.
-    pub fn broadcast(worker_idx: usize) -> Self {
+    pub fn broadcast() -> Self {
         QueryResponse {
             response_tuples: Vec::new(),
-            resp_type: QueryResponseType::Broadcast { worker_idx: worker_idx },
+            resp_type: QueryResponseType::Broadcast { worker_idx: 0 },
         }
     }
 
@@ -135,5 +135,19 @@ impl<D> QueryResponse<D>
              &QueryResponseType::Broadcast { worker_idx } => worker_idx,
              &QueryResponseType::Client { ref client, .. } => client.worker_index(),
          }) as u64
+    }
+
+    pub fn set_worker_idx(&mut self, worker_idx: usize) {
+        self.resp_type = match self.resp_type {
+            QueryResponseType::Broadcast { .. } => QueryResponseType::Broadcast { worker_idx },
+            QueryResponseType::Client { ref client, subscribe } => {
+                let mut client = client.clone();
+                client.worker_index = worker_idx;
+                QueryResponseType::Client {
+                    client,
+                    subscribe,
+                }
+            }
+        }
     }
 }

@@ -107,7 +107,7 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ
                             state_logic(state.clone(), u);
                             // Produce broadcast message to all clients that subscribed to
                             // updates.
-                            let mut response = QueryResponse::broadcast(worker_index);
+                            let mut response = QueryResponse::broadcast();
                             response.append_tuples(&mut update_transform_logic(u)
                                                             .into_iter()
                                                             .map(|x| {

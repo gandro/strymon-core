@@ -19,5 +19,10 @@ path = "timely_system/"
 path = "timely_system/lib"
 
 [workspace]
-members = ["implementations"]
+members = [
+  "keepers/prototype-keeper",
+  "keepers/topology-keeper",
+  "keepers/no-query-keeper",
+  "keepers/word-count-keeper",
+  ]
 exclude = ["timely_system"]

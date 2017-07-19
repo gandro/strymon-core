@@ -128,7 +128,11 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ
                                                     .map(|x| KeeperResponse::Response(x))
                                                     .collect()
                                             );
-                                        response.add_tuple(KeeperResponse::BatchEnd);
+                                        if req.subscribe() {
+                                            response.add_tuple(KeeperResponse::BatchEnd);
+                                        } else {
+                                            response.add_tuple(KeeperResponse::ConnectionEnd);
+                                        }
                                     }
                                     response
                                 }
@@ -142,7 +146,7 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ
                                                         .map(|x| KeeperResponse::Response(x))
                                                         .collect()
                                                 );
-                                            response.add_tuple(KeeperResponse::BatchEnd);
+                                            response.add_tuple(KeeperResponse::ConnectionEnd);
                                         }
                                         _ => {
                                             // Currently we are just dropping incorrectly

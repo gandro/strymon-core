@@ -161,7 +161,15 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                         match connections.entry(idx) {
                             Entry::Occupied(connection) => {
                                 for response in cqr.response_tuples() {
-                                    let _ = connection.get().send_message(response.clone());
+                                    if let Err(err) = connection.get()
+                                           .send_message(response.clone()) {
+                                        warn!("Error on connection to client: {:?}", err);
+                                        break;
+                                    }
+                                }
+                                if !subscribe {
+                                    // If it was a point query/single request close the connection.
+                                    connection.remove_entry();
                                 }
                             }
                             Entry::Vacant(_) => (),

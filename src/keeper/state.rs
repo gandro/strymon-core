@@ -46,7 +46,6 @@ pub struct StateOperatorBuilder<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope>
     name: &'a str,
     in_state_stream: &'a Stream<G, DS>,
     in_query_stream: &'a Stream<G, ClientQuery<DQ>>,
-    worker_index: usize,
     state_logic: Box<FnMut(Rc<RefCell<T>>, &DS) + 'static>,
     dump_state_logic: Box<FnMut(Rc<RefCell<T>>) -> Vec<DQ1> + 'static>,
     update_transform_logic: Box<FnMut(&DS) -> Vec<DQ1> + 'static>,
@@ -63,7 +62,6 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ
                              state: T,
                              state_stream: &'a Stream<G, DS>,
                              query_stream: &'a Stream<G, ClientQuery<DQ>>,
-                             worker_index: usize,
                              state_logic: LS,
                              update_transform_logic: LUT,
                              dump_state_logic: LDS)
@@ -76,7 +74,6 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ
             name: name,
             in_state_stream: state_stream,
             in_query_stream: query_stream,
-            worker_index: worker_index,
             state_logic: Box::new(state_logic),
             dump_state_logic: Box::new(dump_state_logic),
             update_transform_logic: Box::new(update_transform_logic),
@@ -91,7 +88,6 @@ impl<'a, DS, DQ, DQ1, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ
         let inputs = in_state.concat(&in_query);
         let state = self.state.clone();
 
-        let worker_index = self.worker_index;
         let mut state_logic = self.state_logic;
         let mut dump_state_logic = self.dump_state_logic;
         let mut update_transform_logic = self.update_transform_logic;
@@ -202,7 +198,6 @@ mod tests {
                                           0 as u64,
                                           &input_stream,
                                           &client_stream,
-                                          scope.index(),
                                           |state, d| {
                                               // State logic.
                                               let mut state = state.borrow_mut();

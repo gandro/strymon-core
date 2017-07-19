@@ -9,7 +9,7 @@ use std::any::Any;
 use abomonation::Abomonation;
 use futures::{Poll, Async};
 use futures::stream::{Stream, Fuse};
-use futures::executor::{spawn, Spawn, Unpark};
+use futures::executor::{spawn, Spawn, Notify};
 use timely::dataflow::{ScopeParent, Stream as TimelyStream};
 //use timely::dataflow::Stream as TimelyStream;
 use timely::dataflow::operators::{Inspect, Map};
@@ -63,8 +63,8 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                 let mut connections = connections.lock().unwrap();
 
                 // Using Noop here since we don't need notification.
-                let noop = Arc::new(NoopUnpark {});
-                match acceptor.poll_stream(noop) {
+                let noop = Arc::new(NoopNotify {});
+                match acceptor.poll_stream_notify(&noop, 0) {
                     Ok(Async::Ready(Some((query, messenger)))) => {
                         if let Some(cap) = capability.as_mut() {
                             let conn_id = connections.insert_connection(messenger);
@@ -325,10 +325,10 @@ impl<Q, R> Stream for Acceptor<Q, R>
     }
 }
 
-struct NoopUnpark {}
+struct NoopNotify {}
 
-impl Unpark for NoopUnpark {
-    fn unpark(&self) {}
+impl Notify for NoopNotify {
+    fn notify(&self, _: usize) {}
 }
 
 

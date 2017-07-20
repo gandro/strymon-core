@@ -139,16 +139,14 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                         subscribed_clients.retain(|&idx| {
                             match connections.entry(idx) {
                                 Entry::Occupied(connection) => {
-                                    for response in cqr.response_tuples() {
-                                        if let Err(err) = connection.get()
-                                               .send_message(response.clone()) {
+                                    if let Err(err) = connection.get()
+                                           .send_message(cqr.response_tuples().clone()) {
                                             info!("Disconnected from a client with error: '{}'",
                                                   err);
                                             // Something went wrong while communicating with the
                                             // client, we assume they disconnected.
                                             connection.remove_entry();
                                             return false;
-                                        }
                                     }
                                     true
                                 }
@@ -160,14 +158,13 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                         let idx = client.connection_id();
                         match connections.entry(idx) {
                             Entry::Occupied(connection) => {
-                                for response in cqr.response_tuples() {
-                                    if let Err(err) = connection.get()
-                                           .send_message(response.clone()) {
-                                        warn!("Error on connection to client: {:?}", err);
-                                        break;
-                                    }
+                                let mut errored = false;
+                                if let Err(err) = connection.get()
+                                       .send_message(cqr.response_tuples().clone()) {
+                                    warn!("Error on connection to client: {:?}", err);
+                                    errored = true;
                                 }
-                                if !subscribe {
+                                if !subscribe || errored {
                                     // If it was a point query/single request close the connection.
                                     connection.remove_entry();
                                 }
@@ -202,7 +199,7 @@ struct ConnectionStorage<Q, R>
     // connections is a HashMap of user connections indexed by u64. A new user connection simply
     // gets id by adding one to previous id being used (wrapping to 0 if we hit max u64). Since we
     // use u64 we should never fall into already taken place, but should check for that in future.
-    connections: HashMap<u64, Messenger<KeeperQuery<Q>, KeeperResponse<R>>>,
+    connections: HashMap<u64, Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>>,
     next_conn_id: u64,
 }
 
@@ -217,14 +214,16 @@ impl<Q, R> ConnectionStorage<Q, R>
         }
     }
 
-    fn insert_connection(&mut self, conn: Messenger<KeeperQuery<Q>, KeeperResponse<R>>) -> u64 {
+    fn insert_connection(&mut self,
+                         conn: Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>)
+                         -> u64 {
         self.connections.insert(self.next_conn_id, conn);
         let idx = self.next_conn_id;
         self.next_conn_id = self.next_conn_id.wrapping_add(1);
         idx
     }
 
-    fn entry(&mut self, key: u64) -> Entry<u64, Messenger<KeeperQuery<Q>, KeeperResponse<R>>> {
+    fn entry(&mut self, key: u64) -> Entry<u64, Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>> {
         self.connections.entry(key)
     }
 }
@@ -236,8 +235,8 @@ struct Acceptor<Q, R>
 {
     listener: Fuse<Listener>,
     addr: SocketAddr,
-    pending_clients: VecDeque<Messenger<KeeperQuery<Q>, KeeperResponse<R>>>,
-    pending_queries: VecDeque<(KeeperQuery<Q>, Messenger<KeeperQuery<Q>, KeeperResponse<R>>)>,
+    pending_clients: VecDeque<Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>>,
+    pending_queries: VecDeque<(KeeperQuery<Q>, Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>)>,
 }
 
 impl<Q, R> Acceptor<Q, R>
@@ -302,7 +301,7 @@ impl<Q, R> Stream for Acceptor<Q, R>
     where Q: Abomonation + Any + Clone + NonStatic,
           R: Abomonation + Any + Clone + Send + NonStatic
 {
-    type Item = (KeeperQuery<Q>, Messenger<KeeperQuery<Q>, KeeperResponse<R>>);
+    type Item = (KeeperQuery<Q>, Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {

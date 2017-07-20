@@ -22,6 +22,7 @@
 use std::any::Any;
 use std::io;
 use std::marker::PhantomData;
+use std::collections::VecDeque;
 
 use abomonation::Abomonation;
 use futures::{Async, Poll};
@@ -72,6 +73,7 @@ impl<'a, Q, R> KeeperConnection<'a, Q, R>
         Ok(KeeperStream {
                messenger: Some(messenger),
                convert_element_fn: convert_element_regular,
+               buffer: VecDeque::new(),
            })
     }
 
@@ -84,6 +86,7 @@ impl<'a, Q, R> KeeperConnection<'a, Q, R>
         Ok(KeeperStream {
                messenger: Some(messenger),
                convert_element_fn: convert_element_with_batch_markers,
+               buffer: VecDeque::new(),
            })
     }
 
@@ -94,6 +97,7 @@ impl<'a, Q, R> KeeperConnection<'a, Q, R>
         Ok(KeeperStream {
                messenger: Some(messenger),
                convert_element_fn: convert_element_regular,
+               buffer: VecDeque::new(),
            })
     }
 }
@@ -101,7 +105,7 @@ impl<'a, Q, R> KeeperConnection<'a, Q, R>
 fn get_messenger_of_keeper<Q, R>
     (keeper_name: &str,
      coord: &Coordinator)
-     -> Result<Messenger<KeeperResponse<R>, KeeperQuery<Q>>, KeeperLookupError>
+     -> Result<Messenger<Vec<KeeperResponse<R>>, KeeperQuery<Q>>, KeeperLookupError>
     where Q: Abomonation + Any + Clone + NonStatic,
           R: Abomonation + Any + Clone + Send + NonStatic
 {
@@ -112,24 +116,34 @@ fn get_messenger_of_keeper<Q, R>
     Ok(messenger)
 }
 
-fn convert_element_regular<R>(element: KeeperResponse<R>) -> Async<Option<R>>
+/// Returns false if we reached ConnectionEnd marker.
+fn convert_element_regular<R>(batch: Vec<KeeperResponse<R>>, out_buff: &mut VecDeque<R>) -> bool
     where R: Abomonation + Any + Clone + Send + NonStatic
 {
-    match element {
-        KeeperResponse::Response(r) => Async::Ready(Some(r)),
-        KeeperResponse::BatchEnd => Async::NotReady,
-        KeeperResponse::ConnectionEnd => Async::Ready(None),
+    for element in batch {
+        match element {
+            KeeperResponse::Response(r) => out_buff.push_back(r),
+            KeeperResponse::BatchEnd => (),
+            KeeperResponse::ConnectionEnd => return false,
+        }
     }
+    true
 }
 
-fn convert_element_with_batch_markers<R>(element: KeeperResponse<R>) -> Async<Option<Element<R>>>
+/// Returns false if we reached ConnectionEnd marker.
+fn convert_element_with_batch_markers<R>(batch: Vec<KeeperResponse<R>>,
+                                         out_buff: &mut VecDeque<Element<R>>)
+                                         -> bool
     where R: Abomonation + Any + Clone + Send + NonStatic
 {
-    match element {
-        KeeperResponse::Response(r) => Async::Ready(Some(Element::Value(r))),
-        KeeperResponse::BatchEnd => Async::Ready(Some(Element::BatchEnd)),
-        KeeperResponse::ConnectionEnd => Async::Ready(None),
+    for element in batch {
+        match element {
+            KeeperResponse::Response(r) => out_buff.push_back(Element::Value(r)),
+            KeeperResponse::BatchEnd => out_buff.push_back(Element::BatchEnd),
+            KeeperResponse::ConnectionEnd => return false,
+        }
     }
+    true
 }
 
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
@@ -145,8 +159,9 @@ pub struct KeeperStream<Q, R, O>
           R: Abomonation + Any + Clone + Send + NonStatic,
           O: Abomonation + Any + Clone + Send + NonStatic
 {
-    messenger: Option<Messenger<KeeperResponse<R>, KeeperQuery<Q>>>,
-    convert_element_fn: fn(KeeperResponse<R>) -> Async<Option<O>>,
+    messenger: Option<Messenger<Vec<KeeperResponse<R>>, KeeperQuery<Q>>>,
+    convert_element_fn: fn(Vec<KeeperResponse<R>>, &mut VecDeque<O>) -> bool,
+    buffer: VecDeque<O>,
 }
 
 impl<Q, R, O> Stream for KeeperStream<Q, R, O>
@@ -159,21 +174,39 @@ impl<Q, R, O> Stream for KeeperStream<Q, R, O>
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
-            let value = match self.messenger.as_mut() {
-                Some(msgr) => try_ready!(msgr.poll()),
-                None => return Ok(Async::Ready(None)),
+            let mut polled_smth = false;
+            let mut connection_finished = false;
+            match self.messenger.as_mut() {
+                Some(msgr) => {
+                    match msgr.poll()? {
+                        Async::Ready(Some(batch)) => {
+                            polled_smth = true;
+                            connection_finished = !(self.convert_element_fn)(batch,
+                                                                             &mut self.buffer);
+                        }
+                        Async::Ready(None) => connection_finished = true,
+                        Async::NotReady => (),
+                    }
+                }
+                None => (),
             };
-
-            let ret = match value {
-                Some(resp) => (self.convert_element_fn)(resp),
-                None => Async::Ready(None),
-            };
-            match ret {
-                Async::Ready(None) => drop(self.messenger.take()),
-                Async::NotReady => continue,
-                _ => (),
-            };
-            return Ok(ret);
+            if connection_finished {
+                drop(self.messenger.take());
+            }
+            return Ok(match self.buffer.pop_front() {
+                          Some(resp) => Async::Ready(Some(resp)),
+                          None => {
+                              if polled_smth {
+                                  continue;
+                              } else {
+                                  if self.messenger.is_some() {
+                                      Async::NotReady
+                                  } else {
+                                      Async::Ready(None)
+                                  }
+                              }
+                          }
+                      });
         }
     }
 }

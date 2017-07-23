@@ -109,9 +109,9 @@ fn get_messenger_of_keeper<Q, R>
     where Q: Abomonation + Any + Clone + NonStatic,
           R: Abomonation + Any + Clone + Send + NonStatic
 {
-    let keeper = coord.lookup_keeper(keeper_name)?;
+    let (addr, port) = coord.get_keeper_address(keeper_name)?;
     let network = Network::init()?;
-    let (tx, rx) = network.connect((&keeper.addr.0[..], keeper.addr.1))?;
+    let (tx, rx) = network.connect((&addr[..], port))?;
     let messenger = Messenger::new(tx, rx);
     Ok(messenger)
 }

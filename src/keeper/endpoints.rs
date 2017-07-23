@@ -20,7 +20,7 @@ use timely::progress::timestamp::Timestamp;
 
 use timely_system::query::Coordinator;
 use timely_system::network::{Network, Listener};
-use timely_system::query::keepers::KeeperRegistrationError;
+use timely_system::query::keepers::KeeperWorkerRegistrationError;
 use timely_system::network::message::abomonate::NonStatic;
 
 use model::{KeeperQuery, KeeperResponse};
@@ -39,6 +39,7 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
     workers_num: usize,
     // All clients that subscribed to receive updates to the state.
     subscribed_clients: Arc<Mutex<Vec<u64>>>,
+    coord_ref: Option<(String, Coordinator)>,
 }
 
 // TODO:
@@ -95,6 +96,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                worker_index: scope.index(),
                workers_num: scope.peers(),
                subscribed_clients: Arc::new(Mutex::new(Vec::new())),
+               coord_ref: None,
            })
     }
 
@@ -179,16 +181,29 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
             });
     }
 
-    pub fn register_with_coordinator(&self,
+    pub fn register_with_coordinator(&mut self,
                                      name: &str,
                                      coord: &Coordinator)
-                                     -> Result<(), KeeperRegistrationError> {
-        if self.worker_index == 0 {
-            coord.register_keeper(name, self.external_addr())?;
-        }
+                                     -> Result<(), KeeperWorkerRegistrationError> {
+        coord.add_keeper_worker(name, self.worker_index, self.external_addr())?;
+        self.coord_ref = Some((name.to_string(), coord.clone()));
         Ok(())
     }
 }
+
+// Bad idea - connector is dropped before dataflow starts.
+//impl<'a, Q, R, S: ScopeParent, T: Timestamp> Drop for Connector<'a, Q, R, S, T>
+//    where Q: Abomonation + Any + Clone + NonStatic,
+//          R: Abomonation + Any + Clone + Send + NonStatic {
+//
+//    fn drop(&mut self) {
+//        if let Some((ref name, ref coord)) = self.coord_ref {
+//            if let Err(err) = coord.remove_keeper_worker(name, self.worker_index) {
+//                warn!("Unsuccessful deregistration: {:?}", err);
+//            }
+//        }
+//    }
+//}
 
 
 /// Helper struct for storing user connections.

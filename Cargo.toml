@@ -20,9 +20,9 @@ path = "timely_system/lib"
 
 [workspace]
 members = [
-  "keepers/prototype-keeper",
-  "keepers/topology-keeper",
-  "keepers/no-query-keeper",
-  "keepers/word-count-keeper",
+  "keepers/prototype",
+  "keepers/topology",
+  "keepers/no-query",
+  "keepers/word-count",
   ]
 exclude = ["timely_system"]

@@ -1,5 +1,5 @@
 //! Responsible for handling clients.
-use std::collections::{VecDeque, HashMap};
+use std::collections::{VecDeque, HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
@@ -38,7 +38,7 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
     worker_index: usize,
     workers_num: usize,
     // All clients that subscribed to receive updates to the state.
-    subscribed_clients: Arc<Mutex<Vec<u64>>>,
+    subscribed_clients: Arc<Mutex<HashSet<u64>>>,
     coord_ref: Option<(String, Coordinator)>,
 }
 
@@ -95,7 +95,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                in_stream: stream,
                worker_index: scope.index(),
                workers_num: scope.peers(),
-               subscribed_clients: Arc::new(Mutex::new(Vec::new())),
+               subscribed_clients: Arc::new(Mutex::new(HashSet::new())),
                coord_ref: None,
            })
     }
@@ -174,7 +174,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                             Entry::Vacant(_) => (),
                         }
                         if subscribe {
-                            subscribed_clients.push(client.connection_id());
+                            subscribed_clients.insert(client.connection_id());
                         }
                     }
                 };

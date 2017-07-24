@@ -1,3 +1,4 @@
+#![feature(retain_hash_collection)]
 #[macro_use]
 extern crate abomonation_derive;
 #[macro_use]

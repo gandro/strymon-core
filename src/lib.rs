@@ -6,6 +6,8 @@ extern crate log;
 extern crate futures;
 #[macro_use]
 extern crate abomonation;
+#[macro_use]
+extern crate lazy_static;
 extern crate timely_system;
 extern crate timely;
 

@@ -25,7 +25,7 @@ use timely_system::network::message::abomonate::NonStatic;
 
 use model::{KeeperQuery, KeeperResponse};
 use keeper::messenger::Messenger;
-use keeper::model::{ClientQuery, QueryResponse, QueryResponseType};
+use keeper::model::{ClientQuery, QueryResponse};
 
 /// Helper structure that handles accepting clients' requests and responding to them.
 pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
@@ -38,13 +38,9 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
     worker_index: usize,
     workers_num: usize,
     // All clients that subscribed to receive updates to the state.
-    subscribed_clients: Arc<Mutex<HashSet<u64>>>,
+    subscribed_clients: Arc<Mutex<HashMap<u64, HashSet<usize>>>>,
     coord_ref: Option<(String, Coordinator)>,
 }
-
-// TODO:
-//  - make Coordinator aware of multiple workers (and thus multiple copies of the same Keeper)
-
 
 impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
     where Q: Abomonation + Any + Clone + NonStatic,
@@ -95,7 +91,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                in_stream: stream,
                worker_index: scope.index(),
                workers_num: scope.peers(),
-               subscribed_clients: Arc::new(Mutex::new(HashSet::new())),
+               subscribed_clients: Arc::new(Mutex::new(HashMap::new())),
                coord_ref: None,
            })
     }
@@ -120,13 +116,14 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
         out_stream.flat_map(move |cqr: QueryResponse<R>| {
                 // If we get broadcast response, copy it over to all workers.
                 let mut resp = Vec::new();
-                if cqr.is_broadcast() {
+                if let &QueryResponse::Broadcast(ref msg) = &cqr {
                     for x in 0..workers_num {
-                        let mut cloned = cqr.clone();
-                        cloned.set_worker_idx(x);
-                        resp.push(cloned);
+                        let mut cloned = msg.clone();
+                        cloned.set_target_worker_idx(x);
+                        resp.push(QueryResponse::Broadcast(cloned));
                     }
-                } else {
+                }
+                if !cqr.is_broadcast() {
                     resp.push(cqr);
                 }
                 resp
@@ -136,19 +133,23 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                 let mut subscribed_clients = subscribed_clients.lock().unwrap();
                 let mut connections = connections.lock().unwrap();
 
-                match cqr.response_type() {
-                    &QueryResponseType::Broadcast { .. } => {
-                        subscribed_clients.retain(|&idx| {
+                match cqr {
+                    &QueryResponse::Broadcast(ref msg) => {
+                        subscribed_clients.retain(|&idx, ref mut workers| {
+                            if !workers.contains(&msg.source_worker_idx()) {
+                                return true;
+                            }
+                            let mut to_send = msg.response_tuples().clone();
+                            to_send.push(KeeperResponse::BatchEnd);
                             match connections.entry(idx) {
                                 Entry::Occupied(connection) => {
                                     if let Err(err) = connection.get()
-                                           .send_message(cqr.response_tuples().clone()) {
-                                            info!("Disconnected from a client with error: '{}'",
-                                                  err);
-                                            // Something went wrong while communicating with the
-                                            // client, we assume they disconnected.
-                                            connection.remove_entry();
-                                            return false;
+                                           .send_message(to_send.clone()) {
+                                        warn!("Disconnected from a client with error: '{}'", err);
+                                        // Something went wrong while communicating with the
+                                        // client, we assume they disconnected.
+                                        connection.remove_entry();
+                                        return false;
                                     }
                                     true
                                 }
@@ -156,25 +157,29 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                             }
                         });
                     }
-                    &QueryResponseType::Client { ref client, subscribe } => {
-                        let idx = client.connection_id();
+                    &QueryResponse::Unicast(ref msg) => {
+                        let idx = msg.client_details().connection_id();
                         match connections.entry(idx) {
                             Entry::Occupied(connection) => {
                                 let mut errored = false;
-                                if let Err(err) = connection.get()
-                                       .send_message(cqr.response_tuples().clone()) {
+                                let mut to_send = msg.response_tuples().clone();
+                                if msg.subscribe() {
+                                    to_send.push(KeeperResponse::BatchEnd);
+                                } else {
+                                    to_send.push(KeeperResponse::ConnectionEnd);
+                                }
+                                if let Err(err) = connection.get().send_message(to_send) {
                                     warn!("Error on connection to client: {:?}", err);
                                     errored = true;
                                 }
-                                if !subscribe || errored {
+                                if !msg.subscribe() || errored {
                                     // If it was a point query/single request close the connection.
                                     connection.remove_entry();
                                 }
                             }
-                            Entry::Vacant(_) => (),
-                        }
-                        if subscribe {
-                            subscribed_clients.insert(client.connection_id());
+                            Entry::Vacant(_) => {
+                                warn!("Trying to send something to non-existing client");
+                            }
                         }
                     }
                 };

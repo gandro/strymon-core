@@ -23,6 +23,7 @@ use std::any::Any;
 use std::io;
 use std::marker::PhantomData;
 use std::collections::VecDeque;
+use std::fmt;
 
 use abomonation::Abomonation;
 use futures::{Async, Poll};
@@ -233,5 +234,15 @@ impl<S: Stream> Iterator for IntoIter<S> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().and_then(Result::ok)
+    }
+}
+
+impl<Q, R, O> fmt::Debug for KeeperStream<Q, R, O>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic,
+          O: Abomonation + Any + Clone + Send + NonStatic
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "KeeperStream")
     }
 }

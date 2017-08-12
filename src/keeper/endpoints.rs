@@ -387,15 +387,15 @@ mod tests {
             // Receive reqponse.
             let resp_buf = client_rx.wait().next().unwrap();
             let mut resp_buf = resp_buf.unwrap();
-            let resp = resp_buf.pop::<Abomonate, KeeperResponse<String>>().unwrap();
-            assert_eq!(resp, KeeperResponse::Response(qstr));
+            let resp = resp_buf.pop::<Abomonate, Vec<KeeperResponse<String>>>().unwrap();
+            assert_eq!(resp, vec![KeeperResponse::Response(qstr)]);
         });
 
         for conn in acceptor.take(1).wait() {
             let str_msg = "Testing".to_string();
             let (query, messenger) = conn.unwrap();
             assert_eq!(query, KeeperQuery::Query(str_msg.clone()));
-            messenger.send_message(KeeperResponse::Response(str_msg)).unwrap();
+            messenger.send_message(vec![KeeperResponse::Response(str_msg)]).unwrap();
         }
         let _ = client_thread.join();
     }
@@ -421,7 +421,7 @@ mod tests {
                 stream.inspect(|x| println!("got: {:?}", x.query()));
                 let stream =
                     stream.map(|cq| {
-                                   let mut cr = QueryResponse::unicast(&cq, false);
+                                   let mut cr = QueryResponse::unicast(&cq, false, 0);
                                    cr.add_tuple(KeeperResponse::Response("Testing".to_string()));
                                    cr
                                });

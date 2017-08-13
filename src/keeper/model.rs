@@ -222,6 +222,10 @@ impl<D> Unicast<D>
         self.copies
     }
 
+    pub fn source_worker_idx(&self) -> usize {
+        self.source_worker_idx
+    }
+
     pub fn empty_clone(&self) -> Self {
         Unicast {
             response_tuples: Vec::new(),

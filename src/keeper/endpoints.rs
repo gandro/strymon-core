@@ -158,8 +158,8 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                         });
                     }
                     &QueryResponse::Unicast(ref msg) => {
-                        let idx = msg.client_details().connection_id();
-                        match connections.entry(idx) {
+                        let conn_id = msg.client_details().connection_id();
+                        match connections.entry(conn_id) {
                             Entry::Occupied(connection) => {
                                 let mut errored = false;
                                 let mut to_send = msg.response_tuples().clone();
@@ -180,6 +180,13 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                             Entry::Vacant(_) => {
                                 warn!("Trying to send something to non-existing client");
                             }
+                        }
+                        if msg.subscribe() {
+                            subscribed_clients.entry(conn_id).or_insert_with(|| {
+                                let mut set = HashSet::new();
+                                set.insert(msg.source_worker_idx());
+                                set
+                            });
                         }
                     }
                 };

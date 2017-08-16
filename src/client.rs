@@ -4,14 +4,14 @@
 //! clients to request a "dump" of its state, subscribe to updates to the state or both at once.
 //! Those queries can be performed calling `state` method on `KeeperConnection` object with
 //! `StateRequest` object specifying the type of request.
-//! In addition, some Keepers can implement adhoc queries to be called against their state. Those
-//! queries are specific to their Keeper. For the adhoc queries one needs to call the `query`
+//! In addition, some Keepers can implement point queries to be called against their state. Those
+//! queries are specific to their Keeper. For the point queries one needs to call the `query`
 //! method on the `KeeperConnection` object.
 //! Note, that a Keeper's client needs to be compiled together with the Keeper typically, until we
 //! stop using Abomonation.
 //!
 //! `KeeperStream` object represents a stream of tuples produced by a Keeper in response to a query
-//! or a state request. In case of a single state dump or an adhoc query the stream is a one-off
+//! or a state request. In case of a single state dump or a point query the stream is a one-off
 //! batch of tuples. When a client subscribes to updates though, the stream is infinite - each
 //! time the Keeper's state is updated some new tuples arrive on that stream. If the client wants
 //! to be able to distinguish between the batches (eg. in order to advance the progress tracking)
@@ -36,10 +36,16 @@ use timely_system::query::keepers::KeeperLookupError;
 use keeper::messenger::Messenger;
 use model::{KeeperQuery, KeeperResponse, StateRequest};
 
-/// Object representing a connection to a Keeper.
-/// It is parametrized with the type of query that the Keeper accepts (`Q`) and the type of
-/// response that the Keeper returns (`R`). They should be explicitly provided when a new object is
-/// created.
+/// Object representing a connection to a Keeper. It is parametrized with the type of query that
+/// the Keeper accepts (`Q`) and the type of response that the Keeper returns (`R`). They should be
+/// explicitly provided when a new object is created. If the Keeper doesn't support point queries
+/// at all, model::EmptyQT should be used as the query type.
+///
+/// Data sent back from Keeper is always in a form of a stream. The stream might be infinite if
+/// client subscribes to the updates, or finite in other cases. In case of infinite stream you may
+/// want to use `state_with_batch_markers` function---it exposes information about the ends of
+/// batches sent from Keeper that could be used for advancing progress tracking information.
+///
 /// For now, the Abomonation library is used for the serialization but it will be changed in
 /// future. This version of the code doesn't check if the parameters specified are valid and it
 /// just hangs on communication with the Keeper if invalid ones are used.
@@ -91,7 +97,7 @@ impl<'a, Q, R> KeeperConnection<'a, Q, R>
            })
     }
 
-    /// Send an adhoc query.
+    /// Send a point query.
     pub fn query<'b>(&'b mut self, query: Q) -> Result<KeeperStream<Q, R, R>, KeeperLookupError> {
         let messenger = get_messenger_of_keeper(self.keeper_name, self.coord)?;
         messenger.send_message(KeeperQuery::Query(query))?;
@@ -155,6 +161,9 @@ pub enum Element<O>
     BatchEnd,
 }
 
+/// Object representing a stream of tuples produced by a Keeper in response to a query from client.
+///
+/// It is iterable and implements `Stream` from futures-rs.
 pub struct KeeperStream<Q, R, O>
     where Q: Abomonation + Any + Clone + NonStatic,
           R: Abomonation + Any + Clone + Send + NonStatic,

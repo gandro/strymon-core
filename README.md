@@ -3,6 +3,18 @@ Queryable state management library for Timely System
 
 Anyone using this library must use the same version of the timely as the library, otherwise a lot of confusing errors is going to happen.
 
+Cloning
+-------
+To build some parts of the repository you need to also initialize
+`routing-algorithms` directory, which is a git submodule. To do so run the
+following commands (from the root of the directory):
+```
+cd routing-algorithms
+
+git submodule init
+
+git submodule update
+```
 
 Misc
 ----

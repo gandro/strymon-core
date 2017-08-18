@@ -50,6 +50,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
         let worker_index = scope.index();
         let connections = Arc::new(Mutex::new(ConnectionStorage::new()));
         let acceptor = Arc::new(Mutex::new(spawn(Acceptor::new(port)?)));
+        let waiting_queries = Arc::new(Mutex::new(Vec::new()));
         let stream = source(scope, "IncomingClients", |capability| {
             let mut capability = Some(capability);
             let acceptor = acceptor.clone();
@@ -58,31 +59,18 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
             move |output| {
                 let mut acceptor = acceptor.lock().unwrap();
                 let mut connections = connections.lock().unwrap();
+                let mut waiting_queries = waiting_queries.lock().unwrap();
 
-                // Using Noop here since we don't need notification.
-                let noop = Arc::new(NoopNotify {});
-                match acceptor.poll_stream_notify(&noop, 0) {
-                    Ok(Async::Ready(Some((query, messenger)))) => {
-                        if let Some(cap) = capability.as_mut() {
-                            let conn_id = connections.insert_connection(messenger);
-                            let element = ClientQuery::new(query, conn_id, worker_index);
-                            output.session(&cap).give(element);
-                        }
-                    }
-                    Ok(Async::NotReady) => (),
-                    Ok(Async::Ready(None)) => {
+                match poll_clients(&mut acceptor, &mut connections, worker_index) {
+                    Ok(queries) => waiting_queries.extend(queries),
+                    Err(err) => {
+                        error!("Polling client socket produced err: {:?}", err);
                         capability = None;
                     }
-                    Err(_) => {
-                        // TODO:
-                        //  - if the error is fatal (socket broken somehow?) end this stream by
-                        //  releasing the capability:
-                        //  capability = None;
-                        //  - if the error is not fatal (just connection to one client broke) count
-                        //  it somewhere but ignore otherwise
-                        ()
-                    }
-                };
+                }
+                if let Some(cap) = capability.as_mut() {
+                    output.session(&cap).give_iterator(waiting_queries.drain(..));
+                }
             }
         });
         Ok(Connector {
@@ -201,6 +189,41 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
         self.coord_ref = Some((name.to_string(), coord.clone()));
         Ok(())
     }
+}
+
+fn poll_clients<Q, R>(acceptor: &mut Spawn<Acceptor<Q, R>>,
+                      connections: &mut ConnectionStorage<Q, R>,
+                      worker_index: usize)
+                      -> io::Result<Vec<ClientQuery<Q>>>
+    where Q: Abomonation + Any + Clone + NonStatic,
+          R: Abomonation + Any + Clone + Send + NonStatic
+{
+    // Using Noop here since we don't need notification.
+    let noop = Arc::new(NoopNotify {});
+    let mut res = Vec::new();
+    let mut check_for_more = true;
+    while check_for_more {
+        match acceptor.poll_stream_notify(&noop, 0) {
+            Ok(Async::Ready(Some((query, messenger)))) => {
+                check_for_more = true;
+                let conn_id = connections.insert_connection(messenger);
+                let element = ClientQuery::new(query, conn_id, worker_index);
+                res.push(element);
+            }
+            Ok(Async::NotReady) => check_for_more = false,
+            Ok(Async::Ready(None)) => {
+                error!("Stream from clients has ended, no more clients coming. This shouldn't happen");
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe,
+                                          "Broken socket for connections from clients"));
+            }
+            Err(err) => {
+                error!("Stream from clients returned error, no more clients coming. This shouldn't happen");
+                error!("The error is: {:?}", err);
+                return Err(err);
+            }
+        };
+    }
+    Ok(res)
 }
 
 // Bad idea - connector is dropped before dataflow starts.

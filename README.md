@@ -9,7 +9,8 @@ There are two branches in this repository: master and evaluation.
 * *master* branch contains the library and sample Keeper implementations.
 
 * *evaluation* branch adds some instrumentation to Timely System and contains
- helper programs and scripts for running experiments
+ helper programs and scripts for running experiments. Its README also contains
+ a list of steps needed to regenerate the plots from my thesis.
 
 
 Directory structure
@@ -20,7 +21,7 @@ sample Keepers, modified code of Timely System and links to repository required
 for Topology Keeper to work. They are structured in folders in the following
 way:
 
-## `./src`
+### `./src`
 
 This folder contains the Keepers library. It has both the Keeper and Keeper's
 client libraries.
@@ -28,7 +29,7 @@ client libraries.
 The client library is in `client.rs` and the main Keeper framework is in folder
 `keepers/`.
 
-## `./timely_system`
+### `./timely_system`
 
 This folder contains the modified Timely System repository. It was included as
 subtree and then never merged back upstream.
@@ -36,21 +37,21 @@ subtree and then never merged back upstream.
 The code was modified to make the coordinator aware of Keepers and to fix a few
 small bugs.
 
-## `./keepers`
+### `./keepers`
 
 This folder includes the actual Keeper implementations, together with sample clients.
 
 Each Keeper haas its own Cargo package. They are included as the member of the
 workspace defined in the root of the repo.
 
-## `./assets`
+### `./assets`
 
 This folder contains some raw data files for the Keeper implementations to run with.
 
 So, for example, there is the `ulysses.txt` file for running the Word Count
 Keeper and a few files containing network topologies for the Topology Keeper.
 
-## `./routing-algorithms`
+### `./routing-algorithms`
 
 This is a git submodule, pointing to `routing-algorithms` repo. It is needed
 for Topology Keeper, that uses the Topology structure from there.

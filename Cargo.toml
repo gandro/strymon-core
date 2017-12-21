@@ -4,6 +4,7 @@ members = [
     "src/strymon_runtime",
     "src/strymon_model",
     "src/strymon_rpc",
+    "src/strymon_job",
     "apps/connected-components",
     "apps/topology-generator",
     #"apps/deltapath-routing",

@@ -1,0 +1,33 @@
+[package]
+authors = ["Sebastian Wicki <swicki@inf.ethz.ch>"]
+name = "strymon_job"
+version = "0.1.1"
+
+[dependencies]
+clap = "~2.26.2"
+env_logger = "0.4"
+error-chain = "0.11.0"
+futures = "0.1.16"
+libc = "0.2"
+log = "0.3.8"
+rand = "0.3.14"
+serde = "1.0"
+serde_derive = "1.0.23"
+serde_json = "1.0.4"
+slab = "0.4.0"
+time = "0.1.38"
+timely = "0.3.0"
+timely_communication = "0.1.8"
+tokio-core = "0.1.10"
+tokio-io = "0.1"
+tokio-process = "0.1.4"
+tokio-signal = "0.1.2"
+
+[dependencies.strymon_communication]
+path = "../strymon_communication/"
+
+[dependencies.strymon_model]
+path = "../strymon_model/"
+
+[dependencies.strymon_rpc]
+path = "../strymon_rpc/"

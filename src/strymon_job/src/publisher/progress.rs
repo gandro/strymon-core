@@ -31,15 +31,15 @@ impl<T: Timestamp> UpperFrontier<T> {
         }
     }
 
-    /// Returns true if any item in the antichain is strictly greater than the argument.
-    pub fn greater_than(&self, other: &T) -> bool {
+    /// Returns true if any item in the antichain is greater or equal than the argument.
+    pub fn greater_equal(&self, other: &T) -> bool {
         // SAFETY: This assumes that Rev<T> and T use the same memory layout
         debug_assert_eq!(::std::mem::size_of::<&Rev<T>>(), ::std::mem::size_of::<&T>());
         debug_assert_eq!(::std::mem::align_of::<&Rev<T>>(), ::std::mem::align_of::<&T>());
 
         let rev: &Rev<T> = unsafe { ::std::mem::transmute(other) };
 
-        self.antichain.less_than(rev)
+        self.antichain.less_equal(rev)
     }
 
     /// Marks a timestamp as observed.
@@ -128,18 +128,21 @@ mod tests {
     fn upper_frontier() {
         let mut state = UpperFrontier::empty();
         assert_eq!(state.elements(), &[]);
+        assert!(!state.greater_equal(&0));
         assert!(state.insert(0));
         assert_eq!(state.elements(), &[0]);
-        assert!(!state.greater_than(&0));
+        assert!(state.greater_equal(&0));
+        assert!(!state.greater_equal(&1));
         assert!(state.insert(1));
         assert_eq!(state.elements(), &[1]);
-        assert!(!state.greater_than(&1));
-        assert!(state.greater_than(&0));
+        assert!(state.greater_equal(&1));
+        assert!(state.greater_equal(&0));
         assert!(!state.insert(0));
         assert_eq!(state.elements(), &[1]);
-        assert!(!state.greater_than(&6));
+        assert!(!state.greater_equal(&6));
         assert!(state.insert(6));
         assert_eq!(state.elements(), &[6]);
+        assert!(state.greater_equal(&6));
     }
 
     #[test]

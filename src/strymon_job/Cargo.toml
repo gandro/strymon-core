@@ -4,6 +4,7 @@ name = "strymon_job"
 version = "0.1.1"
 
 [dependencies]
+failure = "0.1.1"
 futures = "0.1.16"
 log = "0.3"
 serde = "1.0"
@@ -23,6 +24,9 @@ path = "../strymon_model/"
 
 [dependencies.strymon_rpc]
 path = "../strymon_rpc/"
+
+[dependencies.strymon_runtime]
+path = "../strymon_runtime/"
 
 [dev-dependencies]
 serde_test = "1.0"

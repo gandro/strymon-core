@@ -8,8 +8,8 @@
 
 //! The subscriber logic.
 
-use std::marker::PhantomData;
 use std::io;
+use std::marker::PhantomData;
 
 use futures::{Async, Poll};
 use futures::stream::Stream;
@@ -38,7 +38,7 @@ impl<T, D> Subscriber<T, D>
     ///
     /// The `root` capability is used to maintain the input frontier, it is
     /// typically the one returned by `unordered_input`.
-    pub fn new(&self, (tx, rx): (Sender, Receiver), root: Capability<T>) -> Self {
+    pub fn new((tx, rx): (Sender, Receiver), root: Capability<T>) -> Self {
         let mut frontier = CapabilitySet::new();
         frontier.insert(root);
         Subscriber {
@@ -81,7 +81,7 @@ impl<T, D> Subscriber<T, D>
 }
 
 impl<T, D> Stream for Subscriber<T, D>
-    where T: RemoteTimestamp, D: DeserializeOwned
+    where T: RemoteTimestamp, D: DeserializeOwned,
 {
     type Item = (Capability<T>, Vec<D>);
     type Error = io::Error;
@@ -94,11 +94,15 @@ impl<T, D> Stream for Subscriber<T, D>
             }
         }
 
+        // stream terminated, make sure to drop any rememaining capabilities
+        self.frontier.downgrade(&[]);
+
         Ok(Async::Ready(None))
     }
 }
 
 /// Represents an antichain of epochs which we do not want to propagate.
+#[derive(Debug)]
 struct Filter<T> {
     filter: Vec<T>,
 }
@@ -106,7 +110,9 @@ struct Filter<T> {
 impl<T: Timestamp> Filter<T> {
     /// Removes all elements from the filter which are less or equal than any element in `frontier`
     fn remove(&mut self, frontier: &[T]) {
-        self.filter.retain(|t| frontier.iter().any(|f| t.less_equal(f)))
+        self.filter.retain(|t| {
+            !frontier.iter().any(|f| t.less_equal(f))
+        })
     }
 
     /// Returns `true` if `time` is less or equal than any element in the filter.

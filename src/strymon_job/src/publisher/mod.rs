@@ -10,13 +10,14 @@
 
 use std::io;
 use std::thread;
+use std::sync::{Arc, Mutex, Condvar};
 
 use slab::Slab;
 use serde::Serialize;
 
 use timely::ExchangeData;
 use timely::progress::timestamp::Timestamp;
-use timely::dataflow::operators::capture::event::Event as TimelyEvent;
+use timely::dataflow::operators::capture::event::{Event as TimelyEvent, EventPusher};
 use tokio_core::reactor::{Core, Handle};
 
 use strymon_communication::Network;
@@ -55,8 +56,9 @@ struct PublisherServer<T: Timestamp, D> {
     upper: UpperFrontier<T>,
     // connected subscribers
     subscribers: Slab<Sender>,
+    count: AtomicCounter,
     // tokio event loop
-    events: Box<Stream<Item=Event<T, D>, Error=io::Error>>,
+    events: Option<Box<Stream<Item=Event<T, D>, Error=io::Error>>>,
     notificator: mpsc::UnboundedSender<Event<T, D>>,
     core: Core,
     handle: Handle,
@@ -65,7 +67,7 @@ struct PublisherServer<T: Timestamp, D> {
 impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
     /// Creates a new publisher, accepting subscribers on `socket`, publishing
     /// the Timely events observed on `stream`.
-    fn new(socket: Listener, stream: EventStream<T, D>) -> io::Result<Self> {
+    fn new(socket: Listener, stream: EventStream<T, D>, count: AtomicCounter) -> io::Result<Self> {
         let core = Core::new()?;
         let handle = core.handle();
 
@@ -84,31 +86,31 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
             lower: LowerFrontier::default(),
             upper: UpperFrontier::empty(),
             subscribers: Slab::new(),
-            events: Box::new(events),
+            count: count,
+            events: Some(Box::new(events)),
             notificator: notificator,
             core: core,
             handle: handle,
         })
     }
 
+    fn next_event(&mut self) -> io::Result<Event<T, D>> {
+        // run tokio reactor until we get the next event
+        let stream = self.events.take().unwrap().into_future();
+        let (result, stream) = match self.core.run(stream) {
+            Ok((ev, stream)) => (Ok(ev.unwrap()), stream),
+            Err((err, stream)) => (Err(err), stream),
+        };
+
+        self.events = Some(stream);
+        result
+    }
+
     /// Starts serving subscribers, blocks until the Timely stream completes
     /// (or an error happens).
     fn serve(mut self) -> io::Result<()> {
         loop {
-            // run tokio reactor until we get the next event
-            let event = {
-                let events = self.events.into_future();
-                match self.core.run(events) {
-                    Ok((ev, events)) => {
-                        // restore ownership
-                        self.events = events;
-                        ev.unwrap()
-                    },
-                    Err((err, _)) => return Err(err),
-                }
-            };
-
-            match event {
+            match self.next_event()? {
                 // processing incoming timely events
                 Event::Timely(ev) => self.timely_event(ev)?,
                 // handle networking events
@@ -120,8 +122,8 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
                     error!("Subscriber {}: {}", id, err);
                 }
                 Event::ShutdownRequested => {
-                    // this drains the queues of all still connected subscribers
-                    drop(self.subscribers);
+                    // this drops self, and thus drain the queues of
+                    // all still connected subscribers
                     return Ok(());
                 }
             }
@@ -129,10 +131,17 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
     }
 
     /// Sends `msg` to all connected subscribers.
-    fn broadcast(&self, msg: MessageBuf) {
-        let last = self.subscribers.len();
-        for (i, sub) in self.subscribers.iter().map(|(id, s)| (id+1, s)) {
-            if i < last {
+    fn broadcast(&self, msg: Message<T, D>) -> io::Result<()> {
+        if self.subscribers.len() == 0 {
+            // nothing to do here
+            return Ok(());
+        }
+
+        let msg = MessageBuf::new(msg)?;
+
+        let last = self.subscribers.len() - 1;
+        for (id, sub) in self.subscribers.iter() {
+            if id < last {
                 sub.send(msg.clone());
             } else {
                 // this case is a hint to the compiler that for the last
@@ -141,6 +150,8 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
                 break;
             }
         }
+        
+        Ok(())
     }
 
     /// Processes a single Timely event, might cause multiple messages to be
@@ -151,21 +162,21 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
                 let frontier_changed = self.lower.update(updates);
                 if frontier_changed {
                     let lower = Message::<T, D>::lower(self.lower.elements());
-                    self.broadcast(MessageBuf::new(lower)?);
+                    self.broadcast(lower)?;
                 }
             },
             TimelyEvent::Messages(time, data) => {
-                let new_epoch = !self.upper.greater_than(&time);
+                let new_epoch = !self.upper.greater_equal(&time);
                 if new_epoch {
                     {
                         let upper = Message::<T, D>::upper(self.upper.elements());
-                        self.broadcast(MessageBuf::new(upper)?);
+                        self.broadcast(upper)?;
                     }
                     let updated = self.upper.insert(time.clone());
                     debug_assert!(updated, "new epoch did not change upper?!");
                 }
                 let data = Message::<T, D>::data(time, data);
-                self.broadcast(MessageBuf::new(data)?);
+                self.broadcast(data)?;
             }
         };
 
@@ -177,6 +188,7 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
     /// Installs a "monitor" for the subscriber, making sure we get notified
     /// when it disconnects.
     fn add_subscriber(&mut self, (tx, rx): (Sender, Receiver)) {
+        self.count.increment();
         let id = self.subscribers.insert(tx);
         let notificator = self.notificator.clone();
 
@@ -202,7 +214,15 @@ impl<T: RemoteTimestamp, D: ExchangeData + Serialize> PublisherServer<T, D> {
     /// subscriber is still alive, it will still emit events on errors or
     /// when it disconnects.
     fn remove_subscriber(&mut self, id: SubscriberId) {
+        self.count.decrement();
         self.subscribers.remove(id);
+    }
+}
+
+impl<T: Timestamp, D> Drop for PublisherServer<T, D> {
+    fn drop(&mut self) {
+        self.subscribers.clear();
+        self.count.invalidate();
     }
 }
 
@@ -211,25 +231,24 @@ pub type Addr = (String, u16);
 
 /// A handle for spawned publisher.
 ///
-/// Note the the drop order is important here: The event `EventSink` must be
-/// dropped before `Thread` in order to avoid a deadlock: Dropping `EventSink`
-/// indicates to the publisher thread that it has to shut down, which will block
-/// the join operation until the shutdown is complete.
+/// This implements `EventPusher`, so it can be used with Timely's `capture`.
+/// When dropped, will block and drain any subscriber queues.
 pub struct Publisher<T, D> {
     /// Handle for events to be published by this instance.
-    pub sink: EventSink<T, D>,
-    /// Address of the socket on which this publisher is accepting subscribers.
-    pub addr: Addr,
+    sink: Option<EventSink<T, D>>,
     /// A join handle for the spawned thread.
-    pub thread: Thread,
+    thread: Thread,
+    // The current subscriber count (wrapped in a mutex, so we can block on it)
+    subscribers: AtomicCounter,
 }
 
 impl<T, D> Publisher<T, D> where T: RemoteTimestamp, D: ExchangeData + Serialize {
     /// Spawns a new publisher thread on a ephemerial network port.
     ///
-    /// The corresponding address can be obtained through `Publisher::addr` and
-    /// needs to be registered in the catalog seperately.
-    pub fn new(network: &Network) -> io::Result<Self> {
+    /// The corresponding address can be obtained from the first member of the
+    /// tuple. The publisher handle itself is used to send events into the
+    /// topic.
+    pub fn new(network: &Network) -> io::Result<(Addr, Self)> {
         // the queue between the Timely operator and this publisher thread
         let (timely_sink, timely_stream) = sink::pair();
 
@@ -240,17 +259,60 @@ impl<T, D> Publisher<T, D> where T: RemoteTimestamp, D: ExchangeData + Serialize
             (String::from(host), port)
         };
 
+        let subscribers = AtomicCounter::new();
+        let count = subscribers.clone();
+
         // main event loop of the publisher thread
         let handle = thread::spawn(move || {
-            PublisherServer::new(listener, timely_stream)
+            PublisherServer::new(listener, timely_stream, count)
                 .and_then(|publisher| publisher.serve())
         });
 
-        Ok(Publisher {
-            sink: timely_sink,
-            addr: addr,
+        let publisher = Publisher {
+            sink: Some(timely_sink),
             thread: Thread::new(handle),
-        })
+            subscribers: subscribers,
+        };
+
+        Ok((addr, publisher))
+    }
+
+    /// Blocks the current thread until some subscribers have connected.
+    ///
+    /// Returns the number of currently connected subscribers. Note that this
+    /// does not actually guarantee that the subscribers are still connected,
+    /// only that there was some recent point in time when there were some
+    /// connected subscribers. This is mostly intended for testing purposes.
+    pub fn subscriber_barrier(&self) -> io::Result<usize> {
+        // important: this must unblock when the thread dies, so we make
+        // sure to call `count.invalidate()` in the publisher thread when it drops
+        let count = self.subscribers.wait_nonzero();
+        if count == COUNTER_INVALID {
+            Err(io::Error::new(io::ErrorKind::Other, "publisher terminated"))
+        } else {
+            Ok(count)
+        }
+    }
+}
+
+impl<T, D> EventPusher<T, D> for Publisher<T, D>
+    where T: RemoteTimestamp, D: ExchangeData + Serialize
+{
+    fn push(&mut self, event: TimelyEvent<T, D>) {
+        self.sink.as_mut().unwrap().push(event)
+    }
+}
+
+impl<T, D> Drop for Publisher<T, D> {
+    fn drop(&mut self) {
+        // Note the the drop order is important here: The event `EventSink` must be
+        // dropped before `Thread` in order to avoid a deadlock: Dropping `EventSink`
+        // indicates to the publisher thread that it has to shut down, which will block
+        // the join operation until the shutdown is complete.
+        drop(self.sink.take());
+        if let Err(err) = self.thread.join() {
+            error!("failed to drain subscriber queues: {}", err);
+        }
     }
 }
 
@@ -258,39 +320,63 @@ type ThreadHandle = thread::JoinHandle<io::Result<()>>;
 
 /// A join handle for the publisher thread.
 ///
-/// This blocks when dropped (or when calling the `join` method), to ensure all
-/// subscriber queues are drained properly.
-///
-/// **Note**: Dropping this handle before dropping the corresponding `EventSink`
-/// will cause a deadlock.
-pub struct Thread(Option<ThreadHandle>);
+/// This can be used to ensure all subscriber queues are drained properly.
+struct Thread(Option<ThreadHandle>);
 
 impl Thread {
     fn new(handle: ThreadHandle) -> Self {
         Thread(Some(handle))
     }
 
-    fn join_mut(&mut self) -> io::Result<()> {
+    fn join(&mut self) -> io::Result<()> {
         match self.0.take().map(|t| t.join()) {
             Some(Ok(res)) => res,
             Some(Err(_)) => Err(io::Error::new(io::ErrorKind::Other, "thread panicked")),
             None => Err(io::Error::new(io::ErrorKind::Other, "already joined")),
         }
     }
-
-    /// Waits for the publisher to drain its queues.
-    pub fn join(mut self) -> io::Result<()> {
-        self.join_mut()
-    }
-
-    /// Drops this handle without waiting for the publisher thread to finish.
-    pub fn forget(mut self) {
-        self.0.take();
-    }
 }
 
-impl Drop for Thread {
-    fn drop(&mut self) {
-        let _ = self.join_mut();
+/// A counter which can block readers when it reaches zero.
+#[derive(Debug, Clone)]
+struct AtomicCounter(Arc<(Mutex<usize>, Condvar)>);
+
+const COUNTER_INVALID: usize = ::std::usize::MAX;
+
+impl AtomicCounter {
+    fn new() -> Self {
+        AtomicCounter(Default::default())
+    }
+
+    fn lock<'a>(&'a self) -> (::std::sync::MutexGuard<'a, usize>, &'a Condvar) {
+        let AtomicCounter(ref inner) = *self;
+        (inner.0.lock().expect("publisher thread poisioned counter"), &inner.1)
+    }
+
+    fn increment(&self) {
+        let (mut count, nonzero) = self.lock();
+        *count += 1;
+        nonzero.notify_all();
+    }
+
+    fn decrement(&self) {
+        let (mut count, _) = self.lock();
+        debug_assert!(*count > 0);
+        *count -= 1;
+    }
+
+    fn invalidate(&self) {
+        let (mut count, nonzero) = self.lock();
+        *count = COUNTER_INVALID;
+        nonzero.notify_all();
+    }
+
+    fn wait_nonzero(&self) -> usize {
+        let (mut count, nonzero) = self.lock();
+        while *count == 0 {
+            count = nonzero.wait(count).unwrap();
+        }
+
+        *count
     }
 }

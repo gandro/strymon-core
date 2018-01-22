@@ -98,7 +98,7 @@ impl ExecutorService {
         let mut exec = executable::Builder::new(&executable, args)?;
         exec.threads(threads)
             .process(process)
-            .hostlist(&hostlist)
+            .hostlist(hostlist)
             .working_directory(&jobdir);
 
         self.process.spawn(id, exec)

@@ -6,15 +6,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::borrow::Cow;
-use std::env;
-use std::num;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fmt::{Write, Display};
 use std::io::{BufReader};
 use std::path::Path;
 
@@ -180,6 +176,7 @@ impl ProcessService {
         let mut command = builder.cmd;
         let child = command
             .envs(conf.into_env())
+            .env("RUST_BACKTRACE", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())

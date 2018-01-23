@@ -6,6 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Types used for managing publications.
+
 use std::io;
 
 use timely::ExchangeData;
@@ -25,12 +27,16 @@ use Coordinator;
 use protocol::RemoteTimestamp;
 use publisher::Publisher;
 
+/// Failure states of a publication.
 #[derive(Debug)]
 pub enum PublicationError {
+    /// A topic with the same name already exists.
     TopicAlreadyExists,
+    /// Tried to unpublish a non-existing topic.
     TopicNotFound,
+    /// Tried to unpublish a topic not owned by the current job.
     AuthenticationFailure,
-    TypeIdMismatch,
+    /// Networking error occured.
     IoError(io::Error),
 }
 
@@ -38,7 +44,7 @@ impl From<PublishError> for PublicationError {
     fn from(err: PublishError) -> Self {
         match err {
             PublishError::TopicAlreadyExists => PublicationError::TopicAlreadyExists,
-            err => panic!("failed to publish: {:?}", err),
+            err => panic!("failed to publish: {:?}", err), // auth failure?!
         }
     }
 }
@@ -72,15 +78,31 @@ impl<T, E> From<Result<T, E>> for PublicationError
     }
 }
 
+/// Marker to specify topic partitioning.
+///
+/// A single logical Timely Dataflow stream will have a partition on each worker.
+/// When publishing a logical stream, the publishing job can decide to either
+/// publish each stream partition indivdually, or have them be merged by a
+/// single worker, resulting in a single topic.
 #[derive(Debug, Copy, Clone)]
 pub enum Partition {
+    /// Publish one topic per worker.
+    ///
+    /// The resulting topic name will have the local worker identifier as suffix,
+    /// e.g. `name.1` for the stream produced by worker 1.
     PerWorker,
+    /// Merge all streams and publish a single topic.
+    ///
+    /// No worker identifier is appended to the name.
     Merge,
 }
 
+/// By default, worker 0 publish the merged topic
 const PUBLISH_WORKER_ID: u64 = 0;
 
 impl Partition {
+    /// If the partition settings results in a publication by the local worker,
+    /// return the name of the published topic.
     fn name(&self, name: &str, worker_id: u64) -> Option<String> {
         match *self {
             Partition::PerWorker => Some(format!("{}.{}", name, worker_id)),
@@ -92,10 +114,13 @@ impl Partition {
     }
 }
 
+/// A publication is a publisher + a topic in the catalog.
+///
+/// This type will unpublish the topic when dropped.
 enum Publication<T, D> {
-    // publication exists on local worker
+    /// Publication exists on local worker.
     Local(Topic, Coordinator, Publisher<T, D>),
-    // the publication is on a remote worker
+    /// The publication is on a remote worker.
     Remote,
 }
 
@@ -120,6 +145,7 @@ impl<T, D> Drop for Publication<T, D> {
 }
 
 impl Coordinator {
+    /// Submit a publication request to the coordinator and block.
     fn publish_request(&self,
                        name: String,
                        schema: TopicSchema,
@@ -137,6 +163,23 @@ impl Coordinator {
             .wait()
     }
 
+    /// Publishes a local stream and creates a topic in the catalog.
+    ///
+    /// This will block the current worker until the coordinator has processed
+    /// the publication request.
+    ///
+    /// Each published stream must have a globally unique name, which used to
+    /// create a topic in the catalog. This method injects a publisher operator
+    /// into the Timely dataflow which forwards all data and progress messages
+    /// put into `stream`. The created topic is deregistered when the frontier
+    /// of the input stream becomes empty. Upon deregisteration, the current
+    /// worker is blocked until the queues of any still connected subscribers
+    /// are drained.
+    ///
+    /// If the `Partition::Merge` strategy is used, a single topic is created
+    /// whose name is specified in `name`. If a `Partition::PerWorker` partitioning
+    /// scheme is used, one topic is created for each worker, with the worker's
+    /// index appended, e.g. `foobar.1`.
     pub fn publish<S, D>(&self,
                          name: &str,
                          stream: &Stream<S, D>,
@@ -171,6 +214,7 @@ impl Coordinator {
         Ok(())
     }
 
+    /// Submits a depublication request.
     fn unpublish(&self, topic: TopicId) -> Result<(), PublicationError> {
         self.tx
             .request(&Unpublish {

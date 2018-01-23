@@ -55,6 +55,7 @@ struct PublisherServer<T: Timestamp, D> {
     lower: LowerFrontier<T>,
     upper: UpperFrontier<T>,
     // connected subscribers
+    #[allow(dead_code)]
     subscribers: Slab<Sender>,
     count: AtomicCounter,
     // tokio event loop
@@ -283,6 +284,7 @@ impl<T, D> Publisher<T, D> where T: RemoteTimestamp, D: ExchangeData + Serialize
     /// does not actually guarantee that the subscribers are still connected,
     /// only that there was some recent point in time when there were some
     /// connected subscribers. This is mostly intended for testing purposes.
+    #[allow(dead_code)]
     pub fn subscriber_barrier(&self) -> io::Result<usize> {
         // important: this must unblock when the thread dies, so we make
         // sure to call `count.invalidate()` in the publisher thread when it drops

@@ -131,12 +131,20 @@ mod remote_timestamp {
     }
 }
 
-/// This is a helper trait to workaround the fact that Rust does not allow
-/// us to implement Serde's traits for Timely's custom timestamp types.
+
+/// A trait for Timely timestamps which can be serialized using Serde.
+///
+/// This is a workaround to Rust's orphan rules, allowing the conversion from
+/// and to a `Remote` type used in Strymon topics. An implementation is provided
+/// for all timestamp types owned by Timely. It must be implemented
+/// separately by users which have their own custom Timely timestamps.
 pub trait RemoteTimestamp: Timestamp {
+    /// The `Remote` type must implement the Serde traits, it can be `Self`.
     type Remote: ser::Serialize + de::DeserializeOwned;
 
+    /// Convert the local timestamp into a serializeable remote type.
     fn to_remote(&self) -> Self::Remote;
+    /// Reconstruct the Timely timestamp from a deserialized remote type.
     fn from_remote(remote: Self::Remote) -> Self;
 }
 

@@ -6,6 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![deny(missing_docs)]
+
+//! The Strymon "client-library".
+
 extern crate timely;
 extern crate timely_communication;
 #[macro_use]
@@ -26,9 +30,9 @@ extern crate strymon_communication;
 extern crate strymon_model;
 extern crate strymon_rpc;
 
-pub mod protocol;
-pub mod publisher;
-pub mod subscriber;
+mod protocol;
+mod publisher;
+mod subscriber;
 pub mod operators;
 
 use std::io;
@@ -48,6 +52,11 @@ use strymon_rpc::coordinator::{QueryToken, AddWorkerGroup};
 use strymon_model::QueryId;
 use strymon_model::config::job::Process;
 
+/// Handle to communicate with the Strymon coordinator.
+///
+/// The methods of this object can be used to publish or subscribe to
+/// topics available in the catalog. In order to obtain a `Coordinator` instance,
+/// users must register the current process with `strymon_job::execute`.
 #[derive(Clone)]
 pub struct Coordinator {
     token: QueryToken,
@@ -56,8 +65,9 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    fn initialize(id: QueryId, process: usize, coord: String) -> io::Result<Self> {
-        let network = Network::init()?;
+    /// Registers the local job at the coordinator at address `coord`.
+    fn initialize(id: QueryId, process: usize, coord: String, hostname: String) -> io::Result<Self> {
+        let network = Network::with_hostname(hostname)?;
         let (tx, _) = network.client(&*coord)?;
 
         let announce = tx.request(&AddWorkerGroup {
@@ -82,6 +92,15 @@ impl Coordinator {
     }
 }
 
+/// Executes a Timely dataflow within this Strymon job.
+///
+/// This function requires that the calling process has been spawned by an executor.
+/// Upon successful registration with the Strymon coordinator, the closure `func`
+/// is invoked for each requested worker hosted by the current process.
+///
+/// This function intentionally mirrors `timely::execute`, with the difference that
+/// the worker configuration is provided by the parent executor and that the running
+/// worker gains the ability to talk to the coordinator.
 pub fn execute<T, F>(func: F) -> Result<WorkerGuards<T>, String>
     where T: Send + 'static,
           F: Fn(&mut Root<Allocator>, Coordinator) -> T,
@@ -95,11 +114,11 @@ pub fn execute<T, F>(func: F) -> Result<WorkerGuards<T>, String>
         })?;
 
     // create timely configuration
-    let timely_conf = if !config.addrs.is_empty() {
+    let timely_conf = if config.addrs.len() > 1 {
         info!("Configuration:Cluster({}, {}/{})",
               config.threads,
               config.index,
-              config.addrs.len());
+              config.addrs.len()-1);
         Configuration::Cluster(config.threads, config.index, config.addrs, true)
     } else if config.threads > 1 {
         info!("Configuration:Process({})", config.threads);
@@ -109,7 +128,7 @@ pub fn execute<T, F>(func: F) -> Result<WorkerGuards<T>, String>
         Configuration::Thread
     };
 
-    let coord = Coordinator::initialize(config.job_id, config.index, config.coord)
+    let coord = Coordinator::initialize(config.job_id, config.index, config.coord, config.hostname)
         .map_err(|err| format!("failed to connect to coordinator: {:?}", err))?;
 
     // wrap in mutex because the `Outgoing` is not `Sync` (due to std::mpsc)
@@ -163,7 +182,7 @@ mod tests {
 
     #[test]
     fn raw_publisher() {
-        let network = Network::init().unwrap();
+        let network = Network::with_hostname("localhost".to_string()).unwrap();
         let addr = publisher_thread(&network);
       
         use timely::dataflow::operators::generic::operator::source;

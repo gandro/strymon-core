@@ -43,9 +43,10 @@ pub struct Coordinator {
 
 fn initialize(id: QueryId,
               process: usize,
-              coord: String)
+              coord: String,
+              hostname: String)
               -> Result<Coordinator, IoError> {
-    let network = Network::init()?;
+    let network = Network::with_hostname(hostname)?;
     let (tx, _) = network.client(&*coord)?;
 
     let announce = tx.request(&AddWorkerGroup {
@@ -82,11 +83,11 @@ pub fn execute<T, F>(func: F) -> Result<WorkerGuards<T>, String>
         })?;
 
     // create timely configuration
-    let timely_conf = if !config.addrs.is_empty() {
+    let timely_conf = if config.addrs.len() > 1 {
         info!("Configuration:Cluster({}, {}/{})",
               config.threads,
               config.index,
-              config.addrs.len());
+              config.addrs.len()-1);
         Configuration::Cluster(config.threads, config.index, config.addrs, true)
     } else if config.threads > 1 {
         info!("Configuration:Process({})", config.threads);
@@ -96,7 +97,7 @@ pub fn execute<T, F>(func: F) -> Result<WorkerGuards<T>, String>
         Configuration::Thread
     };
 
-    let coord = initialize(config.job_id, config.index, config.coord)
+    let coord = initialize(config.job_id, config.index, config.coord, config.hostname)
         .map_err(|err| format!("failed to connect to coordinator: {:?}", err))?;
 
     // wrap in mutex because timely requires `Sync` for some reason

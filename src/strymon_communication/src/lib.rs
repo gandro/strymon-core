@@ -47,9 +47,9 @@ impl Network {
         })
     }
 
-    pub fn with_hostname(hostname: &str) -> io::Result<Self> {
+    pub fn with_hostname(hostname: String) -> io::Result<Self> {
         Ok(Network {
-            hostname: Arc::new(String::from(hostname)),
+            hostname: Arc::new(hostname),
         })
     }
 

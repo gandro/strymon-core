@@ -42,8 +42,8 @@ wait_job_output() {
 }
 
 test_pubsub() {
-     sub_id=$(submit --bin subscriber "simple-pubsub")
-     pub_id=$(submit --bin publisher "simple-pubsub")
+     sub_id=$(submit --bin subscriber "${BASEDIR}/simple-pubsub")
+     pub_id=$(submit --bin publisher "${BASEDIR}/simple-pubsub")
      # wait for subscriber to receive some tuples
      wait_job_output "${sub_id}" 'Subscriber received [0-9]+ batches'
 }
@@ -53,7 +53,6 @@ test_pubsub() {
 # main
 #
 echo "Building everything in release mode..."
-cd ${BASEDIR}
 cargo build --release --all
 
 echo "Test artifacts in: ${OUTDIR}"

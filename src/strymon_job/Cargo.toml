@@ -1,10 +1,9 @@
 [package]
 authors = ["Sebastian Wicki <swicki@inf.ethz.ch>"]
 name = "strymon_job"
-version = "0.1.1"
+version = "0.1.2"
 
 [dependencies]
-failure = "0.1.1"
 futures = "0.1.16"
 log = "0.3"
 serde = "1.0"
@@ -13,7 +12,6 @@ slab = "0.4.0"
 timely = "0.3.0"
 timely_communication = "0.1.8"
 tokio-core = "0.1.10"
-tokio-io = "0.1"
 typename = "0.1"
 
 [dependencies.strymon_communication]
@@ -24,9 +22,6 @@ path = "../strymon_model/"
 
 [dependencies.strymon_rpc]
 path = "../strymon_rpc/"
-
-[dependencies.strymon_runtime]
-path = "../strymon_runtime/"
 
 [dev-dependencies]
 serde_test = "1.0"

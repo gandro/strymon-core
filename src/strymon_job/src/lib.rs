@@ -8,7 +8,12 @@
 
 #![deny(missing_docs)]
 
-//! The Strymon "client-library".
+//! The Strymon client-library. In order to register a Timely Dataflow job with
+//! Strymon, users are expected to link against this library and eventually
+//! invoke `strymon_job::execute`. 
+//!
+//! In addition, this library also provides the client-side of the
+//! publish-subscribe mechanism.
 
 extern crate timely;
 extern crate timely_communication;
@@ -38,8 +43,6 @@ pub mod operators;
 use std::io;
 use std::sync::Mutex;
 
-use futures::Future;
-
 use timely::dataflow::scopes::Root;
 
 use timely_communication::Allocator;
@@ -48,7 +51,7 @@ use timely_communication::initialize::{Configuration, WorkerGuards};
 use strymon_communication::Network;
 use strymon_communication::rpc::Outgoing;
 
-use strymon_rpc::coordinator::{QueryToken, AddWorkerGroup};
+use strymon_rpc::coordinator::{QueryToken, AddWorkerGroup, CoordinatorRPC};
 use strymon_model::QueryId;
 use strymon_model::config::job::Process;
 

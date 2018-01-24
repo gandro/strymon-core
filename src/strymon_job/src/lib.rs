@@ -12,8 +12,28 @@
 //! Strymon, users are expected to link against this library and eventually
 //! invoke `strymon_job::execute`. 
 //!
-//! In addition, this library also provides the client-side of the
+//! In addition, this library also provides the operaters needed to use the
 //! publish-subscribe mechanism.
+//!
+//! # Examples
+//!
+//! ```rust,no_run
+//! extern crate strymon_job;
+//! extern crate timely;
+//!
+//! use timely::dataflow::operators::ToStream;
+//! use strymon_job::operators::publish::Partition;
+//!
+//! fn main() {
+//!     strymon_job::execute(|worker, coord| {
+//!         worker.dataflow::<u64, _, _>(|scope| {
+//!             let stream = (0..1000).to_stream(scope);
+//!             coord.publish("numbers", &stream, Partition::Merge)
+//!                 .expect("failed to publish topic");
+//!         });
+//!     }).unwrap();
+//! }
+//! ```
 
 extern crate timely;
 extern crate timely_communication;

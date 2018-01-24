@@ -24,6 +24,12 @@ submit() {
     $STRYMON submit "${@}" | grep "Successfully spawned job:" | cut -d':' -f2  | tr -d ' '
 }
 
+## Teminates a job
+# $1: The job id of the job to terminate
+terminate() {
+    $STRYMON terminate "${1}"
+}
+
 ## Waits for certain output to occur in the job output.
 ## Times out with a failure after 10 seconds without matching the regex.
 # $1: Job id
@@ -46,8 +52,9 @@ test_pubsub() {
      pub_id=$(submit --bin publisher "${BASEDIR}/simple-pubsub")
      # wait for subscriber to receive some tuples
      wait_job_output "${sub_id}" 'Subscriber received [0-9]+ batches'
+     terminate "${pub_id}"
+     terminate "${sub_id}"
 }
-
 
 #
 # main
@@ -62,3 +69,4 @@ trap stop_strymon EXIT
 
 test_pubsub
 
+echo "Tests sucessful."

@@ -27,8 +27,12 @@ use strymon_communication::Network;
 use strymon_communication::rpc::Outgoing;
 
 use strymon_model::QueryId;
+<<<<<<< HEAD
 use strymon_model::config::job::Process;
 use strymon_rpc::coordinator::{AddWorkerGroup, QueryToken};
+=======
+use strymon_rpc::coordinator::{CoordinatorRPC, AddWorkerGroup, QueryToken};
+>>>>>>> master
 
 pub mod subscribe;
 pub mod publish;
@@ -47,7 +51,7 @@ fn initialize(id: QueryId,
               hostname: String)
               -> Result<Coordinator, IoError> {
     let network = Network::with_hostname(hostname)?;
-    let (tx, _) = network.client(&*coord)?;
+    let (tx, _) = network.client::<CoordinatorRPC, _>(&*coord)?;
 
     let announce = tx.request(&AddWorkerGroup {
         query: id,

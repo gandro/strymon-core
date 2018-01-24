@@ -43,6 +43,8 @@ pub mod operators;
 use std::io;
 use std::sync::Mutex;
 
+use futures::Future;
+
 use timely::dataflow::scopes::Root;
 
 use timely_communication::Allocator;

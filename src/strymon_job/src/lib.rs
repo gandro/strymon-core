@@ -68,7 +68,7 @@ impl Coordinator {
     /// Registers the local job at the coordinator at address `coord`.
     fn initialize(id: QueryId, process: usize, coord: String, hostname: String) -> io::Result<Self> {
         let network = Network::with_hostname(hostname)?;
-        let (tx, _) = network.client(&*coord)?;
+        let (tx, _) = network.client::<CoordinatorRPC, _>(&*coord)?;
 
         let announce = tx.request(&AddWorkerGroup {
             query: id,

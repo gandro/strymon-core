@@ -2,7 +2,15 @@
 members = [
     "src/*/",
     "apps/*/",
+    "tests/*/",
 ]
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+"timely" = { git = 'https://github.com/frankmcsherry/timely-dataflow.git' }
+"timely_communication" = { git = 'https://github.com/frankmcsherry/timely-dataflow.git' }
+"abomonation" = { git = 'https://github.com/frankmcsherry/abomonation' }
+"abomonation_derive" = { git = 'https://github.com/mystor/abomonation_derive' }
+"differential-dataflow" = { git = 'https://github.com/frankmcsherry/differential-dataflow' }

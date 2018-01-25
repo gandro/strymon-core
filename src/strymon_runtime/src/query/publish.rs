@@ -14,6 +14,7 @@ use timely::dataflow::channels::Content;
 use timely::dataflow::scopes::Scope;
 use timely::dataflow::stream::Stream;
 use timely::dataflow::operators::Unary;
+use timely::logging::Logger;
 use timely::dataflow::channels::pact::{Exchange, ParallelizationContract, Pipeline};
 use timely_communication::{Allocate, Pull, Push};
 
@@ -89,15 +90,16 @@ impl<T: Timestamp, D: ExchangeData> ParallelizationContract<T, D> for Partition 
     fn connect<A: Allocate>
         (self,
          allocator: &mut A,
-         identifier: usize)
+         identifier: usize,
+         logging: Logger)
          -> (Box<Push<(T, Content<D>)>>, Box<Pull<(T, Content<D>)>>) {
         match self {
             Partition::PerWorker => {
-                let (push, pull) = Pipeline.connect(allocator, identifier);
+                let (push, pull) = Pipeline.connect(allocator, identifier, logging);
                 (Box::new(push), Box::new(pull))
             }
             Partition::Merge => {
-                let (push, pull) = Exchange::new(|_| PUBLISH_WORKER_ID).connect(allocator, identifier);
+                let (push, pull) = Exchange::new(|_| PUBLISH_WORKER_ID).connect(allocator, identifier, logging);
                (push, Box::new(pull))
             }
         }

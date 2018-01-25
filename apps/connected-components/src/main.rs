@@ -11,7 +11,7 @@ extern crate strymon_runtime;
 extern crate timely;
 extern crate differential_dataflow;
 
-use differential_dataflow::operators::{Count, Distinct, Group, Iterate, JoinUnsigned};
+use differential_dataflow::operators::{Count, Threshold, Group, Iterate, Join};
 use differential_dataflow::input::Input;
 use topology_generator::Entity;
 
@@ -37,15 +37,15 @@ fn main() {
                 let edges = edges.enter(&inner.scope());
                 let labels = labels.enter(&inner.scope());
 
-                inner.join_map_u(&edges, |_src,label,dst| (*dst,*label)) // propagate label
+                inner.join_map(&edges, |_src,label,dst| (*dst,*label)) // propagate label
                      .concat(&labels)  // keep original labels
-                     .group_u( |_,v,out| out.push( (*v[0].0, 1) ) ) // group by node, "min"
+                     .group( |_,v,out| out.push( (*v[0].0, 1) ) ) // group by node, "min"
             });
 
             // count the number of connected components by counting the number of
             // distinct labels
             let probe = labels.map(|(_node, label)| label)
-                  .distinct_u()
+                  .distinct()
                   .map(|_| ()) // put all labels into a single group for counting
                   .count()
                   .inspect(|&(((), num_partitions), _, diff)| {

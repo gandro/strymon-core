@@ -1,0 +1,29 @@
+[package]
+name = "timely-keepers"
+version = "0.1.0"
+authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
+
+[dependencies]
+abomonation = "0.4.4"
+abomonation_derive = "0.1.2"
+futures = "0.1.14"
+timely = "0.2.0"
+tokio-core = "0.1.6"
+log = "0.3.7"
+env_logger = "0.3"
+lazy_static = "0.2.8"
+
+[dependencies.timely-system]
+path = "timely_system/"
+
+[dependencies.timely-query]
+path = "timely_system/lib"
+
+[workspace]
+members = [
+  "keepers/prototype",
+  "keepers/topology",
+  "keepers/no-query",
+  "keepers/word-count",
+  ]
+exclude = ["timely_system"]

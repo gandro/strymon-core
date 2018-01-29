@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 #[macro_use]
 extern crate abomonation_derive;
 #[macro_use]
@@ -8,8 +10,14 @@ extern crate futures;
 extern crate abomonation;
 #[macro_use]
 extern crate lazy_static;
-extern crate timely_system;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
 extern crate timely;
+
+extern crate strymon_communication;
+extern crate strymon_rpc;
+extern crate strymon_runtime;
 
 pub mod keeper;
 pub mod client;

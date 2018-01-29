@@ -4,24 +4,26 @@ use std::collections::hash_map::Entry;
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::any::Any;
 
-use abomonation::Abomonation;
 use futures::{Poll, Async};
 use futures::stream::{Stream, Fuse};
 use futures::executor::{spawn, Spawn, Notify};
+
+use serde::ser::Serialize;
+use serde::de::DeserializeOwned;
+
+use timely::ExchangeData;
 use timely::dataflow::{ScopeParent, Stream as TimelyStream};
-//use timely::dataflow::Stream as TimelyStream;
 use timely::dataflow::operators::{Inspect, Map};
 use timely::dataflow::operators::exchange::Exchange;
-use timely::dataflow::operators::operator::source;
+use timely::dataflow::operators::generic::source;
 use timely::dataflow::scopes::child::Child;
 use timely::progress::timestamp::Timestamp;
 
-use timely_system::query::Coordinator;
-use timely_system::network::{Network, Listener};
-use timely_system::query::keepers::KeeperWorkerRegistrationError;
-use timely_system::network::message::abomonate::NonStatic;
+use strymon_runtime::query::Coordinator;
+use strymon_communication::Network;
+use strymon_communication::transport::Listener;
+use strymon_runtime::query::keepers::KeeperWorkerRegistrationError;
 
 use model::{KeeperQuery, KeeperResponse};
 use keeper::messenger::Messenger;
@@ -29,8 +31,6 @@ use keeper::model::{ClientQuery, QueryResponse};
 
 /// Helper structure that handles accepting clients' requests and responding to them.
 pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
 {
     connections: Arc<Mutex<ConnectionStorage<Q, R>>>,
     acceptor: Arc<Mutex<Spawn<Acceptor<Q, R>>>>,
@@ -43,8 +43,8 @@ pub struct Connector<'a, Q, R, S: ScopeParent, T: Timestamp>
 }
 
 impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
+    where Q: ExchangeData + DeserializeOwned,
+          R: ExchangeData + Serialize,
 {
     pub fn new<P: Into<Option<u16>>>(port: P, scope: &mut Child<'a, S, T>) -> io::Result<Self> {
         let worker_index = scope.index();
@@ -195,8 +195,7 @@ fn poll_clients<Q, R>(acceptor: &mut Spawn<Acceptor<Q, R>>,
                       connections: &mut ConnectionStorage<Q, R>,
                       worker_index: usize)
                       -> io::Result<Vec<ClientQuery<Q>>>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
+    where Q: DeserializeOwned, R: Serialize
 {
     // Using Noop here since we don't need notification.
     let noop = Arc::new(NoopNotify {});
@@ -228,8 +227,8 @@ fn poll_clients<Q, R>(acceptor: &mut Spawn<Acceptor<Q, R>>,
 
 // Bad idea - connector is dropped before dataflow starts.
 //impl<'a, Q, R, S: ScopeParent, T: Timestamp> Drop for Connector<'a, Q, R, S, T>
-//    where Q: Abomonation + Any + Clone + NonStatic,
-//          R: Abomonation + Any + Clone + Send + NonStatic {
+//    where Q: Abomonation + Any + Clone ,
+//          R: Abomonation + Any + Clone + Send  {
 //
 //    fn drop(&mut self) {
 //        if let Some((ref name, ref coord)) = self.coord_ref {
@@ -243,8 +242,6 @@ fn poll_clients<Q, R>(acceptor: &mut Spawn<Acceptor<Q, R>>,
 
 /// Helper struct for storing user connections.
 struct ConnectionStorage<Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
 {
     // connections is a HashMap of user connections indexed by u64. A new user connection simply
     // gets id by adding one to previous id being used (wrapping to 0 if we hit max u64). Since we
@@ -254,8 +251,6 @@ struct ConnectionStorage<Q, R>
 }
 
 impl<Q, R> ConnectionStorage<Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
 {
     fn new() -> Self {
         ConnectionStorage {
@@ -279,10 +274,7 @@ impl<Q, R> ConnectionStorage<Q, R>
 }
 
 /// Accept and unwrap clients' requests.
-struct Acceptor<Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
-{
+struct Acceptor<Q, R> {
     listener: Fuse<Listener>,
     addr: SocketAddr,
     pending_clients: VecDeque<Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>>,
@@ -290,8 +282,7 @@ struct Acceptor<Q, R>
 }
 
 impl<Q, R> Acceptor<Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
+    where Q: DeserializeOwned, R: Serialize
 {
     fn new<P: Into<Option<u16>>>(port: P) -> io::Result<Self> {
         let network = Network::init()?;
@@ -348,8 +339,7 @@ impl<Q, R> Acceptor<Q, R>
 }
 
 impl<Q, R> Stream for Acceptor<Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
+    where Q: DeserializeOwned, R: Serialize
 {
     type Item = (KeeperQuery<Q>, Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>);
     type Error = io::Error;

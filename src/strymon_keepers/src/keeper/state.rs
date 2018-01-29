@@ -1,49 +1,36 @@
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::vec::Vec;
 use std::collections::HashMap;
 
-use abomonation::Abomonation;
+use timely::{Data, ExchangeData};
 use timely::dataflow::{Scope, Stream};
-use timely::dataflow::operators::{Concat, ExchangeExtension, Unary, Map as TimelyMap};
+use timely::dataflow::operators::{Concat, Exchange, Unary, Map as TimelyMap};
 use timely::dataflow::channels::pact::Pipeline;
-use timely_system::network::message::abomonate::NonStatic;
 
 use keeper::model::{ClientQuery, QueryResponse};
 use model::{KeeperQuery, KeeperResponse};
 
 /// StateOperator
 /// Can be constructed using StateOperatorBuilder.
-pub struct StateOperator<G: Scope, DQ>
-    where DQ: Abomonation + Any + Clone + NonStatic + Send // Type of outgoing stream.
-{
+pub struct StateOperator<G: Scope, DQ> {
     out_stream: Stream<G, QueryResponse<DQ>>,
 }
 
-impl<G: Scope, DQ> StateOperator<G, DQ>
-    where DQ: Abomonation + Any + Clone + NonStatic + Send
-{
+impl<G: Scope, DQ> StateOperator<G, DQ> where DQ: Data {
     pub fn get_outgoing_responses_stream(&self) -> Stream<G, QueryResponse<DQ>> {
         self.out_stream.clone()
     }
 }
 
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-enum UpdateOrQuery<U, Q>
-    where U: Abomonation + Any + Clone + NonStatic,
-          Q: Abomonation + Any + Clone + NonStatic
-{
+enum UpdateOrQuery<U, Q> {
     Update(U),
     Query(Q),
 }
 
 /// TODO Document what all the type parameters stand for.
-pub struct StateOperatorBuilder<'a, DS, DQ, DO, T: 'static, G: 'a + Scope>
-    where DS: Abomonation + Any + Clone + NonStatic + Send, // Type of data in incoming updates stream.
-          DQ: Abomonation + Any + Clone + NonStatic + Send, // Type of data in incoming queries stream.
-          DO: Abomonation + Any + Clone + NonStatic + Send // Type of data in outgoing stream.
-{
+pub struct StateOperatorBuilder<'a, DS: 'a, DQ: 'a, DO, T: 'static, G: 'a + Scope> {
     name: &'a str,
     in_state_stream: &'a Stream<G, DS>,
     in_query_stream: &'a Stream<G, ClientQuery<DQ>>,
@@ -58,9 +45,9 @@ pub struct StateOperatorBuilder<'a, DS, DQ, DO, T: 'static, G: 'a + Scope>
 }
 
 impl<'a, DS, DQ, DO, T: 'static, G: 'a + Scope> StateOperatorBuilder<'a, DS, DQ, DO, T, G>
-    where DS: Abomonation + Any + Clone + NonStatic + Send, // Type of data in incoming updates stream.
-          DQ: Abomonation + Any + Clone + NonStatic + Send, // Type of data in incoming queries stream.
-          DO: Abomonation + Any + Clone + NonStatic + Send // Type of data in outgoing stream.
+    where DS: ExchangeData, // Type of data in incoming updates stream.
+          DQ: ExchangeData, // Type of data in incoming queries stream.
+          DO: ExchangeData // Type of data in outgoing stream.
 {
     pub fn new<LS, LUT, LDS>(name: &'a str,
                              state: T,

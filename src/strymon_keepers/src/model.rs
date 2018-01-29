@@ -1,8 +1,6 @@
-use std::any::Any;
 use abomonation::Abomonation;
-use timely_system::network::message::abomonate::NonStatic;
 
-#[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
+#[derive(Clone, Debug, Abomonation, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StateRequest {
     JustState,
     JustUpdates,
@@ -25,25 +23,21 @@ impl StateRequest {
     }
 }
 
-#[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub enum KeeperQuery<Q> 
-    where Q: Abomonation + Any + Clone + NonStatic
-{
+#[derive(Clone, Debug, Abomonation, Serialize, Deserialize, PartialEq, Eq)]
+pub enum KeeperQuery<Q> {
     StateRq(StateRequest),
     Query(Q),
 }
 
-#[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub enum KeeperResponse<R>
-    where R: Abomonation + Any + Clone + Send + NonStatic
-{
+#[derive(Clone, Debug, Abomonation, Serialize, Deserialize, PartialEq, Eq)]
+pub enum KeeperResponse<R> {
     Response(R),
     BatchEnd,
     ConnectionEnd,
 }
 
 /// Empty query type for Keepers that do not support adhoc queries.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, )]
 pub enum EmptyQT {}
 
 unsafe_abomonate!(EmptyQT);

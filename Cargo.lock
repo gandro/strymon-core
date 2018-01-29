@@ -482,14 +482,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "simple-pubsub"
-version = "0.1.0"
-dependencies = [
- "strymon_job 0.1.2",
- "timely 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "slab"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -543,6 +535,25 @@ dependencies = [
  "timely_communication 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "typename 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "strymon_keepers"
+version = "0.1.0"
+dependencies = [
+ "abomonation 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "abomonation_derive 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "env_logger 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures 0.1.17 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.27 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_derive 1.0.27 (registry+https://github.com/rust-lang/crates.io-index)",
+ "strymon_communication 0.1.2",
+ "strymon_rpc 0.1.2",
+ "strymon_runtime 0.1.2",
+ "timely 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-core 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

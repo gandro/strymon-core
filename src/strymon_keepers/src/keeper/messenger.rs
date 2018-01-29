@@ -1,16 +1,16 @@
 /// This file contains Messenger - helper structure for receiving and sending MessageBufs
 /// over TCP connection using Abomonation serialization library.
 use std::io;
-use std::any::Any;
 use std::marker::PhantomData;
 
-use abomonation::Abomonation;
+use serde::ser::Serialize;
+use serde::de::DeserializeOwned;
+
 use futures::stream::Stream;
 use futures::{Poll, Async};
 
-use timely_system::network::message::abomonate::{Abomonate, NonStatic};
-use timely_system::network::message::MessageBuf;
-use timely_system::network::{Receiver, Sender};
+use strymon_communication::message::MessageBuf;
+use strymon_communication::transport::{Receiver, Sender};
 
 /// Messenger is able to send and receive messages of given types using the given connection
 /// endpoints.
@@ -39,10 +39,7 @@ use timely_system::network::{Receiver, Sender};
 /// assert_eq!(msg, "Hello!");
 /// # }
 /// ```
-pub struct Messenger<I, O>
-    where I: Abomonation + Any + Clone + NonStatic,
-          O: Abomonation + Any + Clone + NonStatic
-{
+pub struct Messenger<I, O> {
     tx: Sender,
     _out_marker: PhantomData<O>,
     rx: Receiver,
@@ -50,8 +47,7 @@ pub struct Messenger<I, O>
 }
 
 impl<I, O> Messenger<I, O>
-    where I: Abomonation + Any + Clone + NonStatic,
-          O: Abomonation + Any + Clone + NonStatic
+    where I: DeserializeOwned, O: Serialize
 {
     pub fn new(tx: Sender, rx: Receiver) -> Self {
         Messenger {
@@ -63,16 +59,13 @@ impl<I, O> Messenger<I, O>
     }
 
     pub fn send_message(&self, msg: O) -> io::Result<()> {
-        let mut buf = MessageBuf::empty();
-        buf.push::<Abomonate, O>(&msg).expect("Encoding error shouldn't happen with Abomonate.");
-        self.tx.send(buf);
+        self.tx.send(MessageBuf::new::<O>(msg)?);
         Ok(())
     }
 }
 
 impl<I, O> Stream for Messenger<I, O>
-    where I: Abomonation + Any + Clone + NonStatic,
-          O: Abomonation + Any + Clone + NonStatic
+    where I: DeserializeOwned, O: Serialize
 {
     type Item = I;
     type Error = io::Error;
@@ -80,7 +73,7 @@ impl<I, O> Stream for Messenger<I, O>
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         Ok(Async::Ready(match try_ready!(self.rx.poll()) {
             Some(mut buf) => {
-                let msg = buf.pop::<Abomonate, I>().map_err(Into::<io::Error>::into)?;
+                let msg = buf.pop::<I>()?;
                 Some(msg)
             }
             None => None,

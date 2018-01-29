@@ -1,29 +1,25 @@
 [package]
-name = "timely-keepers"
+name = "strymon_keepers"
 version = "0.1.0"
 authors = ["Anna Szybalska <annasz@student.ethz.ch>"]
 
 [dependencies]
-abomonation = "0.4.4"
-abomonation_derive = "0.1.2"
-futures = "0.1.14"
-timely = "0.2.0"
-tokio-core = "0.1.6"
-log = "0.3.7"
-env_logger = "0.3"
-lazy_static = "0.2.8"
+abomonation = "0.4"
+abomonation_derive = "0.2"
+futures = "0.1"
+timely = "0.3.0"
+tokio-core = "0.1"
+log = "0.4"
+env_logger = "0.5"
+lazy_static = "1"
+serde = "1"
+serde_derive = "1"
 
-[dependencies.timely-system]
-path = "timely_system/"
+[dependencies.strymon_communication]
+path = "../strymon_communication"
 
-[dependencies.timely-query]
-path = "timely_system/lib"
+[dependencies.strymon_rpc]
+path = "../strymon_rpc"
 
-[workspace]
-members = [
-  "keepers/prototype",
-  "keepers/topology",
-  "keepers/no-query",
-  "keepers/word-count",
-  ]
-exclude = ["timely_system"]
+[dependencies.strymon_runtime]
+path = "../strymon_runtime"

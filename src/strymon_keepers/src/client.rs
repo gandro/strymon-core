@@ -19,19 +19,19 @@
 //! `KeeperStream` implements both Iterator and futures' Stream so it can be iterated over in the
 //! fashion that suits the user the best.
 //!
-use std::any::Any;
 use std::io;
 use std::marker::PhantomData;
 use std::collections::VecDeque;
 use std::fmt;
 
-use abomonation::Abomonation;
+use serde::ser::Serialize;
+use serde::de::DeserializeOwned;
+
 use futures::{Async, Poll};
 use futures::stream::{Stream, Wait};
-use timely_system::network::Network;
-use timely_system::network::message::abomonate::NonStatic;
-use timely_system::query::Coordinator;
-use timely_system::query::keepers::KeeperLookupError;
+use strymon_communication::Network;
+use strymon_runtime::query::Coordinator;
+use strymon_runtime::query::keepers::KeeperLookupError;
 
 use keeper::messenger::Messenger;
 use model::{KeeperQuery, KeeperResponse, StateRequest};
@@ -49,10 +49,7 @@ use model::{KeeperQuery, KeeperResponse, StateRequest};
 /// For now, the Abomonation library is used for the serialization but it will be changed in
 /// future. This version of the code doesn't check if the parameters specified are valid and it
 /// just hangs on communication with the Keeper if invalid ones are used.
-pub struct KeeperConnection<'a, Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
-{
+pub struct KeeperConnection<'a, Q, R> {
     keeper_name: &'a str,
     coord: &'a Coordinator,
     _query_type: PhantomData<Q>,
@@ -60,8 +57,8 @@ pub struct KeeperConnection<'a, Q, R>
 }
 
 impl<'a, Q, R> KeeperConnection<'a, Q, R>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
+    where Q: Serialize,
+          R: DeserializeOwned,
 {
     pub fn new(keeper_name: &'a str, coord: &'a Coordinator) -> Self {
         KeeperConnection {
@@ -113,8 +110,8 @@ fn get_messenger_of_keeper<Q, R>
     (keeper_name: &str,
      coord: &Coordinator)
      -> Result<Messenger<Vec<KeeperResponse<R>>, KeeperQuery<Q>>, KeeperLookupError>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic
+    where Q: Serialize,
+          R: DeserializeOwned,
 {
     let (addr, port) = coord.get_keeper_address(keeper_name)?;
     let network = Network::init()?;
@@ -124,9 +121,7 @@ fn get_messenger_of_keeper<Q, R>
 }
 
 /// Returns false if we reached ConnectionEnd marker.
-fn convert_element_regular<R>(batch: Vec<KeeperResponse<R>>, out_buff: &mut VecDeque<R>) -> bool
-    where R: Abomonation + Any + Clone + Send + NonStatic
-{
+fn convert_element_regular<R>(batch: Vec<KeeperResponse<R>>, out_buff: &mut VecDeque<R>) -> bool {
     for element in batch {
         match element {
             KeeperResponse::Response(r) => out_buff.push_back(r),
@@ -141,7 +136,6 @@ fn convert_element_regular<R>(batch: Vec<KeeperResponse<R>>, out_buff: &mut VecD
 fn convert_element_with_batch_markers<R>(batch: Vec<KeeperResponse<R>>,
                                          out_buff: &mut VecDeque<Element<R>>)
                                          -> bool
-    where R: Abomonation + Any + Clone + Send + NonStatic
 {
     for element in batch {
         match element {
@@ -154,9 +148,7 @@ fn convert_element_with_batch_markers<R>(batch: Vec<KeeperResponse<R>>,
 }
 
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub enum Element<O>
-    where O: Abomonation + Any + Clone + Send + NonStatic
-{
+pub enum Element<O> {
     Value(O),
     BatchEnd,
 }
@@ -164,20 +156,15 @@ pub enum Element<O>
 /// Object representing a stream of tuples produced by a Keeper in response to a query from client.
 ///
 /// It is iterable and implements `Stream` from futures-rs.
-pub struct KeeperStream<Q, R, O>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic,
-          O: Abomonation + Any + Clone + Send + NonStatic
-{
+pub struct KeeperStream<Q, R, O> {
     messenger: Option<Messenger<Vec<KeeperResponse<R>>, KeeperQuery<Q>>>,
     convert_element_fn: fn(Vec<KeeperResponse<R>>, &mut VecDeque<O>) -> bool,
     buffer: VecDeque<O>,
 }
 
 impl<Q, R, O> Stream for KeeperStream<Q, R, O>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic,
-          O: Abomonation + Any + Clone + Send + NonStatic
+    where Q: Serialize,
+          R: DeserializeOwned,
 {
     type Item = O;
     type Error = io::Error;
@@ -222,9 +209,8 @@ impl<Q, R, O> Stream for KeeperStream<Q, R, O>
 }
 
 impl<Q, R, O> IntoIterator for KeeperStream<Q, R, O>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic,
-          O: Abomonation + Any + Clone + Send + NonStatic
+    where Q: Serialize,
+          R: DeserializeOwned,
 {
     type Item = O;
     type IntoIter = IntoIter<Self>;
@@ -246,11 +232,7 @@ impl<S: Stream> Iterator for IntoIter<S> {
     }
 }
 
-impl<Q, R, O> fmt::Debug for KeeperStream<Q, R, O>
-    where Q: Abomonation + Any + Clone + NonStatic,
-          R: Abomonation + Any + Clone + Send + NonStatic,
-          O: Abomonation + Any + Clone + Send + NonStatic
-{
+impl<Q, R, O> fmt::Debug for KeeperStream<Q, R, O> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "KeeperStream")
     }

@@ -1,8 +1,5 @@
-use std::any::Any;
 use std::vec::Vec;
 use std::time::Instant;
-use abomonation::Abomonation;
-use timely_system::network::message::abomonate::NonStatic;
 
 use model::{KeeperQuery, KeeperResponse};
 
@@ -34,9 +31,7 @@ impl Client {
 }
 
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub struct ClientQuery<D>
-    where D: Abomonation + Any + Clone + NonStatic
-{
+pub struct ClientQuery<D> {
     query: KeeperQuery<D>,
     client: Client,
     copies: usize,
@@ -44,7 +39,6 @@ pub struct ClientQuery<D>
 }
 
 impl<D> ClientQuery<D>
-    where D: Abomonation + Any + Clone + NonStatic
 {
     pub fn new(query: KeeperQuery<D>, connection_id: u64, worker_index: usize) -> Self {
         lazy_static! {
@@ -74,16 +68,12 @@ impl<D> ClientQuery<D>
 
 /// This needs to be created with the ClientQuery that this is the response for.
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub enum QueryResponse<D>
-    where D: Abomonation + Any + Clone + Send + NonStatic
-{
+pub enum QueryResponse<D> {
     Broadcast(Broadcast<D>),
     Unicast(Unicast<D>),
 }
 
-impl<D> QueryResponse<D>
-    where D: Abomonation + Any + Clone + Send + NonStatic
-{
+impl<D> QueryResponse<D> {
     /// Creates a broadcast response. Such a message is to be sent to all subscribed clients, it is
     /// not tied to a specific one.
     pub fn broadcast(source_worker_idx: usize) -> Self {
@@ -95,7 +85,6 @@ impl<D> QueryResponse<D>
     }
 
     pub fn unicast<Q>(query: &ClientQuery<Q>, subscribe_to_updates: bool, worker_idx: usize) -> Self
-        where Q: Abomonation + Any + Clone + NonStatic
     {
         QueryResponse::Unicast(Unicast {
                                    response_tuples: Vec::new(),
@@ -146,17 +135,13 @@ impl<D> QueryResponse<D>
 }
 
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub struct Broadcast<D>
-    where D: Abomonation + Any + Clone + Send + NonStatic
-{
+pub struct Broadcast<D> {
     response_tuples: Vec<KeeperResponse<D>>,
     source_worker_idx: usize,
     target_worker_idx: usize,
 }
 
-impl<D> Broadcast<D>
-    where D: Abomonation + Any + Clone + Send + NonStatic
-{
+impl<D> Broadcast<D> {
     pub fn add_tuple(&mut self, tuple: KeeperResponse<D>) {
         self.response_tuples.push(tuple)
     }
@@ -179,9 +164,7 @@ impl<D> Broadcast<D>
 }
 
 #[derive(Clone, Debug, Abomonation, PartialEq, Eq)]
-pub struct Unicast<D>
-    where D: Abomonation + Any + Clone + Send + NonStatic
-{
+pub struct Unicast<D> {
     response_tuples: Vec<KeeperResponse<D>>,
     client: Client,
     subscribe: bool,
@@ -191,9 +174,7 @@ pub struct Unicast<D>
     timestamp: u64,
 }
 
-impl<D> Unicast<D>
-    where D: Abomonation + Any + Clone + Send + NonStatic
-{
+impl<D> Unicast<D> {
     pub fn add_tuple(&mut self, tuple: KeeperResponse<D>) {
         self.response_tuples.push(tuple)
     }

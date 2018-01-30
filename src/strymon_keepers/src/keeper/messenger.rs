@@ -19,13 +19,13 @@ use strymon_communication::transport::{Receiver, Sender};
 /// 
 /// # Example:
 /// ```
-/// # extern crate timely_system;
-/// # extern crate timely_keepers;
+/// # extern crate strymon_communication;
+/// # extern crate strymon_keepers;
 /// # extern crate futures;
 /// # fn main() {
 /// use futures::{Async, Stream};
-/// use timely_keepers::keeper::messenger::Messenger;
-/// use timely_system::network::Network;
+/// use strymon_keepers::keeper::messenger::Messenger;
+/// use strymon_communication::Network;
 /// 
 /// let network = Network::init().unwrap();
 /// let listener = network.listen(None).unwrap();

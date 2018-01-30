@@ -2,7 +2,6 @@
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::io;
-use std::net::{ToSocketAddrs, SocketAddr};
 use std::sync::{Arc, Mutex};
 
 use futures::{Poll, Async};
@@ -84,7 +83,7 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
            })
     }
 
-    pub fn external_addr(&self) -> SocketAddr {
+    pub fn external_addr(&self) -> (String, u16) {
         self.acceptor
             .lock()
             .unwrap()
@@ -185,7 +184,8 @@ impl<'a, Q, R, S: ScopeParent, T: Timestamp> Connector<'a, Q, R, S, T>
                                      name: &str,
                                      coord: &Coordinator)
                                      -> Result<(), KeeperWorkerRegistrationError> {
-        coord.add_keeper_worker(name, self.worker_index, self.external_addr())?;
+        let (host, port) = self.external_addr();
+        coord.add_keeper_worker(name, self.worker_index, (&*host, port))?;
         self.coord_ref = Some((name.to_string(), coord.clone()));
         Ok(())
     }
@@ -276,7 +276,7 @@ impl<Q, R> ConnectionStorage<Q, R>
 /// Accept and unwrap clients' requests.
 struct Acceptor<Q, R> {
     listener: Fuse<Listener>,
-    addr: SocketAddr,
+    addr: (String, u16),
     pending_clients: VecDeque<Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>>,
     pending_queries: VecDeque<(KeeperQuery<Q>, Messenger<KeeperQuery<Q>, Vec<KeeperResponse<R>>>)>,
 }
@@ -287,13 +287,9 @@ impl<Q, R> Acceptor<Q, R>
     fn new<P: Into<Option<u16>>>(port: P) -> io::Result<Self> {
         let network = Network::init()?;
         let listener = network.listen(port)?;
-        let addr = match listener.external_addr()
-                  .to_socket_addrs()?
-                  .next() {
-            Some(addr) => addr,
-            None => {
-                return Err(io::Error::new(io::ErrorKind::Other, "Server returned wrong address"));
-            }
+        let addr = {
+            let (host, port) = listener.external_addr();
+            (host.to_string(), port)
         };
         Ok(Acceptor {
                listener: listener.fuse(),
@@ -303,8 +299,8 @@ impl<Q, R> Acceptor<Q, R>
            })
     }
 
-    fn external_addr(&self) -> SocketAddr {
-        self.addr
+    fn external_addr(&self) -> (String, u16) {
+        self.addr.clone()
     }
 
     /// Handshake all incoming client connections.
@@ -381,9 +377,8 @@ mod tests {
     use timely::dataflow::operators::Map;
     use timely::dataflow::operators::Inspect;
 
-    use timely_system::network::Network;
-    use timely_system::network::message::MessageBuf;
-    use timely_system::network::message::abomonate::Abomonate;
+    use strymon_communication::Network;
+    use strymon_communication::message::MessageBuf;
 
     use keeper::model::QueryResponse;
     use model::{KeeperQuery, KeeperResponse};
@@ -392,22 +387,21 @@ mod tests {
     #[test]
     fn test_acceptor() {
         let acceptor = Acceptor::<String, String>::new(None).unwrap();
-        let addr = acceptor.external_addr();
-
+        let (host, port) = acceptor.external_addr();
         let network = Network::init().unwrap();
-        let (client_tx, client_rx) = network.connect(addr).unwrap();
+        let (client_tx, client_rx) = network.connect((&*host, port)).unwrap();
 
         let client_thread = thread::spawn(move || {
             let qstr = "Testing".to_string();
             // Send query.
             let mut buf = MessageBuf::empty();
-            buf.push::<Abomonate, KeeperQuery<String>>(&KeeperQuery::Query(qstr.clone())).unwrap();
+            buf.push::<KeeperQuery<String>>(KeeperQuery::Query(qstr.clone())).unwrap();
             client_tx.send(buf);
 
             // Receive reqponse.
             let resp_buf = client_rx.wait().next().unwrap();
             let mut resp_buf = resp_buf.unwrap();
-            let resp = resp_buf.pop::<Abomonate, Vec<KeeperResponse<String>>>().unwrap();
+            let resp = resp_buf.pop::<Vec<KeeperResponse<String>>>().unwrap();
             assert_eq!(resp, vec![KeeperResponse::Response(qstr)]);
         });
 
@@ -454,13 +448,13 @@ mod tests {
                 let query = KeeperQuery::Query("Testing".to_string());
                 // Send query.
                 let mut buf = MessageBuf::empty();
-                buf.push::<Abomonate, KeeperQuery<String>>(&query).unwrap();
+                buf.push::<KeeperQuery<String>>(query).unwrap();
                 client_tx.send(buf);
 
                 // Receive reqponse.
                 let resp_buf = client_rx.wait().next().unwrap();
                 let mut resp_buf = resp_buf.unwrap();
-                let resp = resp_buf.pop::<Abomonate, KeeperResponse<String>>().unwrap();
+                let resp = resp_buf.pop::<KeeperResponse<String>>().unwrap();
                 assert_eq!(resp, KeeperResponse::Response("Testing".to_string()));
             });
 
